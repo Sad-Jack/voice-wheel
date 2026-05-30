@@ -6,7 +6,7 @@ import pytest
 
 pytest.importorskip("AppKit")
 
-from voice_wheel.clipboard import Clipboard  # noqa: E402
+from voice_wheel.hostos.macos.clipboard import Clipboard  # noqa: E402
 
 
 def test_push_and_restore_round_trip():

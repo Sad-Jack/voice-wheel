@@ -1,8 +1,7 @@
 # Voice Wheel / AI Voice Clipboard — runtime dependencies
 # Recommended: Python 3.11–3.12 (mlx-whisper / faster-whisper may lack 3.14 wheels).
 
-# GUI + macOS native bridge
-PyQt6>=6.7
+# macOS native bridge (overlay, clipboard, tray, event tap)
 pyobjc-framework-Cocoa>=10.3
 pyobjc-framework-Quartz>=10.3
 
@@ -15,8 +14,10 @@ numpy>=1.26
 
 # STT — default backend (Apple Silicon, fast)
 mlx-whisper>=0.4.0
-# STT — CPU fallback
+# STT — CPU fallback (cross-platform)
 faster-whisper>=1.0.0
 
-# LLM
+# LLM — cloud option (claude_cli/claude_warm use the `claude` CLI; ollama is external)
 anthropic>=0.40.0
+# HTTP client for the local Ollama backend
+requests>=2.31

@@ -21,27 +21,17 @@ message — NOT in --append-system-prompt (the CLI flags that as injection).
 
 from __future__ import annotations
 
-import json
+import logging
 import os
 import shutil
 import subprocess
-import threading
 
+from .claude_warm import ClaudeWarmProcess
 from .config import LLMConfig, app_support_dir
 
+log = logging.getLogger(__name__)
+
 _CLI_BACKENDS = ("claude_warm", "claude_cli")
-
-
-def _terminate(proc) -> None:
-    try:
-        if proc.stdin:
-            proc.stdin.close()
-    except Exception:  # noqa: BLE001
-        pass
-    try:
-        proc.terminate()
-    except Exception:  # noqa: BLE001
-        pass
 
 
 class LLMUnavailableError(RuntimeError):
@@ -49,148 +39,87 @@ class LLMUnavailableError(RuntimeError):
 
 
 class LLMClient:
-    def __init__(self, config: LLMConfig) -> None:
+    def __init__(self, config: LLMConfig, sector_models: dict | None = None) -> None:
         self._cfg = config
-        self._backend = getattr(config, "backend", "claude_warm")
+        self._backend = getattr(config, "backend", "ollama")
+        self._sector_models = sector_models or {}  # sector_key -> {backend, model}
         self._client = None  # anthropic.Anthropic, lazily built
         self._claude = None  # resolved path to the claude CLI
         self._ollama_ok = None
-        self._proc = None  # pre-warmed claude stream-json process
-        self._reader = None  # background thread draining its stdout
-        self._result_event = None
-        self._result_holder = None
-        self._proc_lock = threading.Lock()
+        self._warm = None  # ClaudeWarmProcess, spawned on prewarm() for claude_warm
 
     @property
     def available(self) -> bool:
-        if self._backend in _CLI_BACKENDS:
+        return self._backend_available(self._backend)
+
+    def available_for(self, sector_key) -> bool:
+        backend, _ = self._effective(sector_key)
+        return self._backend_available(backend)
+
+    def _backend_available(self, backend: str) -> bool:
+        if backend in _CLI_BACKENDS:
             return self._claude_path() is not None
-        if self._backend == "ollama":
+        if backend == "ollama":
             return self._ollama_reachable()
         return bool(os.environ.get("ANTHROPIC_API_KEY"))
+
+    def _effective(self, sector_key) -> tuple[str, str]:
+        """Resolve (backend, model) for a sector — its override or the default."""
+        ov = (self._sector_models.get(sector_key) or {}) if sector_key else {}
+        backend = ov.get("backend") or self._backend
+        model = ov.get("model") or (
+            self._cfg.ollama_model if backend == "ollama" else self._cfg.model
+        )
+        return backend, model
 
     def warm_up(self) -> None:
         if self._backend == "ollama":
             try:
                 self._complete_ollama("Ты помощник.", "ок")  # loads the model into RAM
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as exc:  # noqa: BLE001 - warm-up is best-effort, not fatal
+                log.debug("ollama warm-up skipped: %s", exc)
         elif self._backend == "anthropic" and self.available:
             self._ensure_client()
         # claude_warm/claude_cli: nothing to pre-warm globally (per-press prewarm).
 
-    def complete(self, system: str, user: str) -> str:
-        if self._backend == "claude_warm":
-            return self._complete_warm(system, user)
-        if self._backend == "claude_cli":
-            return self._complete_cli(system, user)
-        if self._backend == "ollama":
-            return self._complete_ollama(system, user)
-        return self._complete_api(system, user)
+    def complete(self, system: str, user: str, sector_key: str | None = None) -> str:
+        backend, model = self._effective(sector_key)
+        if backend == "claude_warm":
+            # use the prewarmed process only when it matches the default model
+            if model == self._cfg.model:
+                return self._complete_warm(system, user)
+            return self._complete_cli(system, user, model)
+        if backend == "claude_cli":
+            return self._complete_cli(system, user, model)
+        if backend == "ollama":
+            return self._complete_ollama(system, user, model)
+        return self._complete_api(system, user, model)
 
     # -- pre-warm lifecycle (claude_warm) -------------------------------------
 
     def prewarm(self) -> None:
-        """Spawn the stream-json process now so its startup hides behind recording.
-
-        A background thread drains stdout immediately — otherwise the child blocks
-        writing its boot output and never finishes warming up during the wait.
-        """
+        """Spawn the warm process now so its startup hides behind recording time."""
         if self._backend != "claude_warm":
             return
         claude = self._claude_path()
         if not claude:
             return
-        with self._proc_lock:
-            self._kill_proc_locked()
-            try:
-                proc = subprocess.Popen(
-                    [
-                        claude, "-p",
-                        "--input-format", "stream-json",
-                        "--output-format", "stream-json",
-                        "--model", self._cfg.model,
-                        "--strict-mcp-config",
-                        "--verbose",
-                    ],
-                    stdin=subprocess.PIPE,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.DEVNULL,
-                    text=True,
-                    cwd=self._workdir(),
-                    bufsize=1,
-                )
-            except Exception:  # noqa: BLE001
-                self._proc = None
-                return
-            self._proc = proc
-            self._result_event = threading.Event()
-            self._result_holder = {}
-            self._reader = threading.Thread(
-                target=self._reader_loop,
-                args=(proc, self._result_event, self._result_holder),
-                daemon=True,
-            )
-            self._reader.start()
+        self._warm = ClaudeWarmProcess(claude, self._cfg.model, self._workdir())
+        self._warm.spawn()
 
     def discard_prewarm(self) -> None:
         """Kill an unused pre-warmed process (e.g. dictate ring used no LLM)."""
-        with self._proc_lock:
-            self._kill_proc_locked()
-
-    def _kill_proc_locked(self) -> None:
-        if self._proc is not None:
-            _terminate(self._proc)
-            self._proc = None
-        self._reader = None
-        self._result_event = None
-        self._result_holder = None
-
-    @staticmethod
-    def _reader_loop(proc, event, holder) -> None:
-        """Continuously drain stdout from spawn time; capture the result event."""
-        try:
-            for line in proc.stdout:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    obj = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if obj.get("type") == "result":
-                    holder["result"] = str(obj.get("result", "")).strip()
-                    event.set()
-                    return
-        except Exception:  # noqa: BLE001
-            pass
-        finally:
-            event.set()  # unblock the waiter even if the stream closed early
+        if self._warm is not None:
+            self._warm.discard()
+            self._warm = None
 
     def _complete_warm(self, system: str, user: str) -> str:
-        with self._proc_lock:
-            proc, event, holder = self._proc, self._result_event, self._result_holder
-            self._proc = None  # take ownership (reader thread keeps running)
-            self._reader = None
-            self._result_event = None
-            self._result_holder = None
-        if proc is None or proc.poll() is not None or event is None:
-            return self._complete_cli(system, user)  # not pre-warmed -> one-shot
-        try:
-            content = f"{system}\n\n{user}"
-            msg = json.dumps(
-                {"type": "user", "message": {"role": "user", "content": content}}
-            )
-            proc.stdin.write(msg + "\n")
-            proc.stdin.flush()
-            if not event.wait(timeout=90):
-                raise RuntimeError("warm claude: timeout")
-            result = (holder or {}).get("result")
-            if not result:
-                raise RuntimeError("warm claude: no result")
-            return result
-        finally:
-            _terminate(proc)
+        warm, self._warm = self._warm, None
+        if warm is None or not warm.is_warm():
+            if warm is not None:
+                warm.discard()
+            return self._complete_cli(system, user, self._cfg.model)  # not pre-warmed
+        return warm.complete(f"{system}\n\n{user}")
 
     # -- one-shot CLI backend -------------------------------------------------
 
@@ -206,13 +135,13 @@ class LLMClient:
         d.mkdir(parents=True, exist_ok=True)
         return str(d)
 
-    def _complete_cli(self, system: str, user: str) -> str:
+    def _complete_cli(self, system: str, user: str, model: str | None = None) -> str:
         claude = self._claude_path()
         if not claude:
             raise LLMUnavailableError("`claude` CLI not found (install Claude Code).")
         prompt = f"{system}\n\n{user}"
         proc = subprocess.run(
-            [claude, "-p", "--model", self._cfg.model, "--strict-mcp-config"],
+            [claude, "-p", "--model", model or self._cfg.model, "--strict-mcp-config"],
             input=prompt,
             cwd=self._workdir(),
             capture_output=True,
@@ -234,35 +163,37 @@ class LLMClient:
 
             requests.get(f"{self._cfg.ollama_url}/api/tags", timeout=2)
             self._ollama_ok = True
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001 - any error = treat ollama as unreachable
+            log.debug("ollama not reachable at %s: %s", self._cfg.ollama_url, exc)
             self._ollama_ok = False
         return bool(self._ollama_ok)
 
-    def _complete_ollama(self, system: str, user: str) -> str:
+    def _complete_ollama(self, system: str, user: str, model: str | None = None) -> str:
         import requests
 
         resp = requests.post(
             f"{self._cfg.ollama_url}/api/chat",
             json={
-                "model": self._cfg.ollama_model,
+                "model": model or self._cfg.ollama_model,
                 "messages": [
                     {"role": "system", "content": system},
                     {"role": "user", "content": user},
                 ],
                 "stream": False,
+                "keep_alive": "30m",  # keep the model in RAM — avoids reload stalls
                 "options": {"temperature": 0.3, "num_predict": self._cfg.max_tokens},
             },
-            timeout=120,
+            timeout=(5, 60),  # (connect, read) — fail fast instead of hanging
         )
         resp.raise_for_status()
         return str(resp.json().get("message", {}).get("content", "")).strip()
 
     # -- anthropic backend ----------------------------------------------------
 
-    def _complete_api(self, system: str, user: str) -> str:
+    def _complete_api(self, system: str, user: str, model: str | None = None) -> str:
         client = self._ensure_client()
         message = client.messages.create(
-            model=self._cfg.model,
+            model=model or self._cfg.model,
             max_tokens=self._cfg.max_tokens,
             system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
             messages=[{"role": "user", "content": user}],

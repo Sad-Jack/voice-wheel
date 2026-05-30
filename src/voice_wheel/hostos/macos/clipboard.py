@@ -10,8 +10,6 @@ writing the result, the user's Cmd+V would grab the wrong thing.
 
 from __future__ import annotations
 
-from typing import Optional
-
 from AppKit import NSPasteboard, NSPasteboardTypeString
 
 
@@ -20,7 +18,7 @@ class Clipboard:
         self._pb = NSPasteboard.generalPasteboard()
         self._previous: list[str] = []
 
-    def read_text(self) -> Optional[str]:
+    def read_text(self) -> str | None:
         value = self._pb.stringForType_(NSPasteboardTypeString)
         return str(value) if value is not None else None
 

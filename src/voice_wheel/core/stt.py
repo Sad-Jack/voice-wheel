@@ -35,8 +35,25 @@ _MLX_REPOS = {
 class STTEngine:
     def __init__(self, config: STTConfig) -> None:
         self._cfg = config
-        self._backend = config.backend
+        self._backend = self._resolve(config.backend)
         self._fw_model = None  # faster-whisper WhisperModel, lazily built
+        log.info("STT backend: %s (model %s)", self._backend, config.model)
+
+    @staticmethod
+    def _resolve(backend: str) -> str:
+        """'auto' -> mlx on Apple Silicon (if installed), else faster-whisper."""
+        if backend != "auto":
+            return backend
+        import importlib.util
+        import platform as _plat
+
+        if (
+            _plat.system() == "Darwin"
+            and _plat.machine() == "arm64"
+            and importlib.util.find_spec("mlx_whisper") is not None
+        ):
+            return "mlx"
+        return "faster-whisper"
 
     def transcribe(self, audio: np.ndarray, language: str) -> str:
         if audio.size == 0:
@@ -54,7 +71,7 @@ class STTEngine:
         """Pre-load/compile so the first real transcribe is fast. Errors are non-fatal."""
         dummy = np.zeros(SAMPLE_RATE // 2, dtype="float32")  # 0.5s of silence
         try:
-            self.transcribe(dummy, self._cfg_language_hint())
+            self.transcribe(dummy, "ru")
         except Exception as exc:  # noqa: BLE001
             log.warning("STT warm-up skipped: %s", exc)
 
@@ -80,6 +97,3 @@ class STTEngine:
             audio, language=language, beam_size=1
         )
         return "".join(seg.text for seg in segments).strip()
-
-    def _cfg_language_hint(self) -> str:
-        return "ru"

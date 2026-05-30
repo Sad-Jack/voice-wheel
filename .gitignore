@@ -18,6 +18,14 @@ config.json
 # macOS
 .DS_Store
 
+# IDE
+.idea/
+.vscode/
+
 # Models / caches
 .cache/
 *.mlpackage
+
+# Generated app bundle
+Voice Wheel.app/
+*.app/

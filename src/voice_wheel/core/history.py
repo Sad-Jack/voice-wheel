@@ -12,7 +12,6 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 
 @dataclass(frozen=True)
@@ -61,7 +60,7 @@ class History:
             self._prune_locked()
             return new_id
 
-    def recent(self, n: Optional[int] = None) -> list[HistoryEntry]:
+    def recent(self, n: int | None = None) -> list[HistoryEntry]:
         n = n or self.limit
         with self._lock:
             rows = self._conn.execute(
