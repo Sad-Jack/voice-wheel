@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+
+# App data / secrets
+config.json
+*.sqlite
+*.sqlite3
+.env
+
+# macOS
+.DS_Store
+
+# Models / caches
+.cache/
+*.mlpackage

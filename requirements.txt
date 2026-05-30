@@ -1,0 +1,22 @@
+# Voice Wheel / AI Voice Clipboard — runtime dependencies
+# Recommended: Python 3.11–3.12 (mlx-whisper / faster-whisper may lack 3.14 wheels).
+
+# GUI + macOS native bridge
+PyQt6>=6.7
+pyobjc-framework-Cocoa>=10.3
+pyobjc-framework-Quartz>=10.3
+
+# Global hotkey / mouse listener
+pynput>=1.7.7
+
+# Audio capture
+sounddevice>=0.4.7
+numpy>=1.26
+
+# STT — default backend (Apple Silicon, fast)
+mlx-whisper>=0.4.0
+# STT — CPU fallback
+faster-whisper>=1.0.0
+
+# LLM
+anthropic>=0.40.0

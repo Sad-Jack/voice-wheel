@@ -1,0 +1,27 @@
+{
+  "hotkey": {
+    "kind": "keyboard",
+    "key": "f8",
+    "_comment": "kind: 'keyboard' (pynput key name, e.g. 'f8', 'alt_r', 'cmd_r') or 'mouse' (button name, e.g. 'button9'). Hold-to-record only."
+  },
+  "language": "ru",
+  "stt": {
+    "backend": "mlx",
+    "model": "small",
+    "fallback": "faster-whisper",
+    "_comment": "backend: 'mlx' (default, Apple Silicon) or 'faster-whisper'. model: tiny|base|small|medium. small is the ru sweet spot."
+  },
+  "llm": {
+    "model": "claude-haiku-4-5-20251001",
+    "max_tokens": 1024,
+    "_comment": "ANTHROPIC_API_KEY must be set in the environment."
+  },
+  "default_mode": {
+    "ring": "transform",
+    "sector": "clean",
+    "_comment": "Used before the radial wheel (Phase D) exists. ring: dictate|transform|context. sector: clean|short|friendly|tech."
+  },
+  "max_context_chars": 6000,
+  "auto_paste": false,
+  "history_limit": 10
+}
