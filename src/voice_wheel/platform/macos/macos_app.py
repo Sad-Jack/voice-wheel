@@ -17,7 +17,6 @@ from __future__ import annotations
 import logging
 import os
 import threading
-from collections import deque
 
 import objc
 from AppKit import (
@@ -31,6 +30,7 @@ from PyObjCTools import AppHelper
 
 from ...core.config import Config, app_support_dir
 from ...core.history import History
+from ...core.job_tracker import JobTracker
 from ...core.llm import LLMClient
 from ...core.pipeline import Pipeline
 from ...core.recorder import Recorder, trim_silence
@@ -56,10 +56,9 @@ class VoiceWheel(NSObject):
         self._config = config
         self._concurrent = bool(getattr(config, "concurrent", False))
         self._recording = False
-        self._inflight = 0           # jobs currently processing (drives the spinner)
-        self._results = deque()      # finished (color, note) payloads, popped on main
         self._tick_timer = None
-        self._gen = 0                # cycle id; in non-concurrent mode stale jobs drop
+        # All cross-thread state (cycle id, inflight count, result queue) lives here.
+        self._jobs = JobTracker()
 
         self._clipboard = Clipboard()
         self._history = History(
@@ -155,9 +154,8 @@ class VoiceWheel(NSObject):
         self._wheel.hide()
         if not self._concurrent:
             self._spinner.stop()
-            self._inflight = 0
-            self._results.clear()
-        self._gen += 1
+            self._jobs.reset()
+        self._jobs.bump_generation()
         self._recording = True
         loc = NSEvent.mouseLocation()  # bottom-left origin (for the panel)
         self._wheel.show_at(loc.x, loc.y)
@@ -182,7 +180,7 @@ class VoiceWheel(NSObject):
             self._wheel.hide()
             return
         self._recording = False
-        gen = self._gen
+        gen = self._jobs.generation
         ring, sector = self._wheel.selection()
         self._wheel.hide()
         audio = trim_silence(self._recorder.stop())
@@ -194,21 +192,20 @@ class VoiceWheel(NSObject):
             return
         print(f"○ стоп → обработка ({ring}/{sector or 'центр'})…", flush=True)
         self._menubar.setStatus_("обработка…")
-        self._inflight += 1
+        self._jobs.begin()
         self._spinner.start()  # idempotent; keeps spinning while any job runs
         threading.Thread(
             target=self._process, args=(audio, ring, sector, gen), daemon=True
         ).start()
 
     def finishProcessing_(self, _sender):  # noqa: N802
-        self._inflight = max(0, self._inflight - 1)
-        if self._inflight == 0:
+        if self._jobs.finish() == 0:
             self._spinner.stop()
             self._menubar.setStatus_("Voice Wheel — готов")
-        try:
-            color, note = self._results.popleft()
-        except IndexError:
+        payload = self._jobs.pop_result()
+        if payload is None:
             return
+        color, note = payload
         if not color:
             return  # cancelled / stale — no ping
         m = NSEvent.mouseLocation()  # ping where the cursor IS now
@@ -225,7 +222,7 @@ class VoiceWheel(NSObject):
         try:
             result = self._pipeline.run(audio, ring, sector)
             self._llm.discard_prewarm()  # no-op if consumed; kills it if dictate (unused)
-            if (not self._concurrent) and gen != self._gen:
+            if (not self._concurrent) and self._jobs.is_stale(gen):
                 pass  # superseded by a newer press — drop (no clipboard, no ping)
             else:
                 text = result.result.strip()
@@ -251,7 +248,7 @@ class VoiceWheel(NSObject):
         except Exception as exc:  # noqa: BLE001
             log.exception("processing failed")
             color, note = "red", f"❌ Ошибка: {exc}"
-        self._results.append((color, note))
+        self._jobs.push_result((color, note))
         self.performSelectorOnMainThread_withObject_waitUntilDone_("finishProcessing:", None, False)
 
 

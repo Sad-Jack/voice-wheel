@@ -11,6 +11,7 @@ src/voice_wheel/
     config.py            загрузка/парсинг config.json, dataclass-ы настроек, _project_root
     modes.py             секторы из prompts/*.md, сборка system/user-промптов
     pipeline.py          роутинг: dictate / transform / context → текст результата
+    job_tracker.py       межпоточное состояние: generation/inflight/results (под локом)
     llm.py               4 бэкенда (ollama/claude_warm/claude_cli/anthropic) + per-sector модель
     stt.py               распознавание: mlx-whisper / faster-whisper / auto
     recorder.py          захват аудио (sounddevice) в numpy-буфер
@@ -26,7 +27,7 @@ src/voice_wheel/
     clipboard.py         буфер обмена (NSPasteboard) + стек «вернуть прошлый»
 ```
 
-**Здоровые стороны (НЕ трогаем):** направление зависимостей верное (`core` не знает про `platform`; `platform → core`), циклов нет, бизнес-логика отделена от UI/IO, ядро тестируемо (17 тестов), линтер+CI зелёные.
+**Здоровые стороны (НЕ трогаем):** направление зависимостей верное (`core` не знает про `platform`; `platform → core`), циклов нет, бизнес-логика отделена от UI/IO, ядро тестируемо (23 теста), линтер+CI зелёные.
 
 ## Трекер задач
 
@@ -37,7 +38,7 @@ src/voice_wheel/
 | A1 | Ленивая загрузка секторов (убрать побочку на импорте) | 🟠 P2 | ✅ |
 | A2 | Удалить мёртвый код (`RING_RADII`, `DEAD_ZONE_RADIUS`, `_cfg_language_hint`) | 🟡 P3 | ✅ |
 | A3 | Разбить god-контроллер `macos_app.py` (извлечь `TriggerManager`) | 🔴 P1 | ✅ |
-| A4 | Формализовать межпоточное состояние (`_gen`/`_inflight`/`_results`) | 🟠 P2 | ⬜ |
+| A4 | Формализовать межпоточное состояние (`_gen`/`_inflight`/`_results`) | 🟠 P2 | ✅ |
 | A11 | ⚡ CGEventTap на выделенном потоке (был фриз) | 🔴 P1 | ✅ |
 | A5 | Извлечь `ClaudeWarmProcess` из `llm.py` | 🟠 P2 | ✅ |
 | A6 | `wheel_overlay.py`: геометрия → `core/wheel_geometry.py` + тесты | 🟡 P3 | ✅ |
@@ -72,10 +73,9 @@ src/voice_wheel/
 **Решение:** `mouse_tap.SideButtonTap` теперь поднимает **свой CFRunLoop на daemon-потоке** (`CGEventTapCreate` + `CFRunLoopRun()`). Колбэк бежит на этом потоке и только перекидывает работу в главный через `performSelectorOnMainThread`. Tap всегда отзывчив, что бы ни делал главный поток.
 **Trade-off:** колбэк теперь на отдельном потоке — но он и так только диспетчерит (UI не трогает), так что безопасно.
 
-### A4 — Межпоточное состояние 🟠 P2
-**Проблема:** `_gen` (поколение цикла), `_inflight` (счётчик задач), `_results` (deque) меняются и в главном потоке, и в рабочих. Работает на GIL + аккуратном порядке, но это неявный контракт — легко сломать будущей правкой.
-**Решение:** инкапсулировать в маленький `JobTracker` с понятными методами (`begin()/finish()/is_stale(gen)`), один владелец состояния. Или хотя бы задокументировать инварианты прямо у полей.
-**Trade-off:** низкий риск, но и пользы видимой нет — чисто защита от будущих багов.
+### A4 — Межпоточное состояние 🟠 P2 ✅ (сделано)
+**Результат:** вынес `_gen`/`_inflight`/`_results` в `core/job_tracker.py` (`JobTracker`) — один владелец, всё под `threading.Lock`, неявный GIL-контракт стал явным. API: `bump_generation()`/`generation`/`is_stale(gen)` (стейл-чек), `begin()`/`finish()`/`inflight` (спиннер), `push_result()`/`pop_result()` (очередь результатов), `reset()` (сброс при non-concurrent нажатии). Контроллер похудел и читается линейно; миграция 1:1 по поведению. Чистый Python → покрыл юнит-тестами, включая два concurrency-теста (8 потоков × begin/finish и push/pop — счётчик возвращается ровно в 0, ничего не теряется). Платформо-независимо: Windows-контроллер переиспользует.
+**Trade-off:** лок на крошечных операциях (раз в запись, не в кадре) — стоимость ноль; зато контракт защищён от будущих правок.
 
 ### A5 — `ClaudeWarmProcess` из `llm.py` 🟠 P2 ✅ (сделано)
 **Результат:** вынес весь warm-процесс (spawn/reader-thread/complete/discard) в `core/claude_warm.py` (`ClaudeWarmProcess`, 122 стр). `llm.py` похудел **301 → 206 строк**; `LLMClient.prewarm/_complete_warm` теперь в 3 строки делегируют классу. Поведение сохранено.
