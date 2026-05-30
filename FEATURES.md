@@ -33,7 +33,7 @@
 |---|------|----------|------------|--------|
 | 12 | 2-е кольцо = контекст из буфера | Внешнее кольцо: буфер как контекст + голос-инструкция → промпт сектора → в буфер. Центр=диктовка, внутр=обработать речь, внешн=ответить на буфер | 6 | ✅ |
 | 13 | Документация запуска из консоли | README: установка, запуск, смена бэкенда, правка промптов, триггер, troubleshooting — без GUI | 6 | ✅ |
-| 14 | Разделение core / platform | `core/` (config, modes, pipeline, llm, stt, recorder, history — без ОС) и `platform/macos/` (overlay, tap, tray, tts, clipboard, settings, app). Вход `python -m voice_wheel` выбирает платформу. Ядро не зависит от платформы → Windows добавляется рядом | — | ✅ |
+| 14 | Разделение core / hostos | `core/` (config, modes, pipeline, llm, stt, recorder, history, job_tracker — без ОС) и `hostos/macos/` (overlay, tap, tray, tts, clipboard, settings, app; пакет назван `hostos`, чтобы не тенить stdlib `platform`). Вход `python -m voice_wheel` выбирает платформу. Ядро не зависит от платформы → Windows добавляется рядом | — | ✅ |
 | 15 | STT переключаемый (faster-whisper) | `stt.backend`: `auto` (mlx на Apple Silicon, иначе faster-whisper) / `mlx` / `faster-whisper`. Выбор в окне настроек. faster-whisper установлен и проверен end-to-end (распознаёт точно). Кроссплатформенный движок готов | 14 | ✅ |
 | 16 | Кроссплатформа: Windows | Оверлей / хоткей / буфер / трей под Windows | 14, 15 | ⬜ |
 | 17 | Трей-иконка | Иконка в меню-баре (NSStatusItem): живой статус (готов/запись/обработка) + Выход | — | ✅ |

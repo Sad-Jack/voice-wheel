@@ -7,7 +7,7 @@ import sys
 
 def main():
     if sys.platform == "darwin":
-        from .platform.macos.macos_app import main as run
+        from .hostos.macos.macos_app import main as run
         return run()
     raise SystemExit(
         f"Платформа {sys.platform!r} пока не поддерживается (есть только macOS)."

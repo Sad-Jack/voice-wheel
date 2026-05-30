@@ -16,7 +16,7 @@ src/voice_wheel/
     stt.py               распознавание: mlx-whisper / faster-whisper / auto
     recorder.py          захват аудио (sounddevice) в numpy-буфер
     history.py           SQLite, последние результаты
-  platform/macos/        всё PyObjC (UI/IO под macOS)
+  hostos/macos/          всё PyObjC (UI/IO под macOS) — пакет назван hostos, чтобы не тенить stdlib `platform`
     macos_app.py         КОНТРОЛЛЕР: жизненный цикл, триггеры, запись, обработка, трей-хендлеры
     wheel_overlay.py     радиальное колесо (NSPanel + отрисовка + геометрия выбора)
     pulse.py             спиннер обработки + цветной пинг завершения
@@ -27,7 +27,7 @@ src/voice_wheel/
     clipboard.py         буфер обмена (NSPasteboard) + стек «вернуть прошлый»
 ```
 
-**Здоровые стороны (НЕ трогаем):** направление зависимостей верное (`core` не знает про `platform`; `platform → core`), циклов нет, бизнес-логика отделена от UI/IO, ядро тестируемо (23 теста), линтер+CI зелёные.
+**Здоровые стороны (НЕ трогаем):** направление зависимостей верное (`core` не знает про `hostos`; `hostos → core`), циклов нет, бизнес-логика отделена от UI/IO, ядро тестируемо (23 теста), линтер+CI зелёные.
 
 ## Трекер задач
 
@@ -42,7 +42,7 @@ src/voice_wheel/
 | A11 | ⚡ CGEventTap на выделенном потоке (был фриз) | 🔴 P1 | ✅ |
 | A5 | Извлечь `ClaudeWarmProcess` из `llm.py` | 🟠 P2 | ✅ |
 | A6 | `wheel_overlay.py`: геометрия → `core/wheel_geometry.py` + тесты | 🟡 P3 | ✅ |
-| A7 | Пакет `platform/` тенит stdlib `platform` → переименовать | 🟡 P3 | ⬜ |
+| A7 | Пакет `platform/` тенит stdlib `platform` → переименовать | 🟡 P3 | ✅ |
 | A8 | `Clipboard` Protocol в core (явная зависимость pipeline) | 🟡 P3 | ✅ |
 | A9 | Сузить/залогировать широкие `except Exception` (20 шт) | 🟡 P3 | ✅ |
 | A10 | Добавить `ruff` (линтер) + минимальный CI | 🟡 P3 | ✅ |
@@ -60,11 +60,11 @@ src/voice_wheel/
 `RING_RADII` и `DEAD_ZONE_RADIUS` в `modes.py` остались от старого дизайна колеса (новый `wheel_overlay` держит свои радиусы) — 0 использований. `_cfg_language_hint()` возвращал просто `"ru"`. Удалено.
 
 ### A3 — God-контроллер `macos_app.py` 🔴 P1 ✅ (сделано)
-**Результат:** вынес `TriggerManager` в `platform/macos/triggers.py` (121 стр). `macos_app` похудел **412 → 309 строк**; весь перехват кнопок/клавиш + async-`_fire` теперь в одном изолированном модуле. Контроллер просто строит список триггеров и зовёт `TriggerManager.start(...)`. Поведение идентично (async-dispatch сохранён — фриз не вернётся).
+**Результат:** вынес `TriggerManager` в `hostos/macos/triggers.py` (121 стр). `macos_app` похудел **412 → 309 строк**; весь перехват кнопок/клавиш + async-`_fire` теперь в одном изолированном модуле. Контроллер просто строит список триггеров и зовёт `TriggerManager.start(...)`. Поведение идентично (async-dispatch сохранён — фриз не вернётся).
 
 **Проблема (была):** один класс `VoiceWheel` (412 строк) делает **всё**: создаёт сервисы, регистрирует триггеры (Quartz-tap + pynput + `_dispatch`), ведёт запись (`onPress`/`onTick`/`onRelease`), обработку (`_process`/`finishProcessing`), хендлеры трея (`_on_reuse`/`_on_restore`/`onTts`), плюс модульные `_load_dotenv`/`_ensure_accessibility`/`main`.
 **Почему важно:** самый хрупкий код (активный event-tap + потоки) перемешан с рутиной. Любая правка рядом рискует задеть ввод (мы уже ловили фриз). Тяжело читать и тестировать.
-**Решение:** извлечь `platform/macos/triggers.py` → `TriggerManager`, который владеет tap'ом, pynput-листенерами и асинхронным `_dispatch`; принимает карту `{action: (press, release)}`. Контроллер худеет до ~300 строк и становится тонким оркестратором.
+**Решение:** извлечь `hostos/macos/triggers.py` → `TriggerManager`, который владеет tap'ом, pynput-листенерами и асинхронным `_dispatch`; принимает карту `{action: (press, release)}`. Контроллер худеет до ~300 строк и становится тонким оркестратором.
 **Trade-off:** трогаем хрупкий event-tap. Делать аккуратно, с сохранением async-dispatch, и **ты тестируешь нажатия после**.
 **Шаги:** (1) вынести `_dispatch` + `_start_listener` + `_start_pynput` в `TriggerManager`; (2) контроллер передаёт свои `onPress_/onRelease_/onTts_`; (3) запустить, проверить колесо/озвучку/боковые кнопки.
 
@@ -89,10 +89,9 @@ src/voice_wheel/
 **Решение:** вынести геометрию в `core/wheel_geometry.py` (чистый Python, без ObjC) — её можно покрыть юнит-тестами; `wheel_overlay` остаётся про отрисовку. Бонус: геометрия пригодится для Windows-оверлея (переиспользуемая).
 **Trade-off:** небольшой churn; зато логика выбора секторов становится платформо-независимой и тестируемой.
 
-### A7 — `platform/` тенит stdlib 🟡 P3
-**Проблема:** наш пакет называется `platform`, как stdlib-модуль `platform`. Сейчас работает (absolute import в Py3 берёт stdlib), но это footgun: однажды кто-то сделает относительный импорт и поймает сюрприз.
-**Решение:** переименовать `platform/` → `hostos/` (или `osimpl/`). Поправить импорты (`...hostos.macos`), `__main__`, тесты.
-**Trade-off:** механический churn ради устранения латентной мины. Низкий приоритет.
+### A7 — `platform/` тенит stdlib 🟡 P3 ✅ (сделано)
+**Результат:** `git mv src/voice_wheel/platform → hostos` (история переносов сохранена как rename). Блёст-радиус оказался крошечным: всего 2 ссылки в коде (`__main__.py` и `tests/test_clipboard.py`) — относительные `...core`-импорты внутри пакета от переименования не зависят, скрипты путь не упоминают. Латентная мина (однажды кто-то сделает `from . import platform` и поймает сюрприз) обезврежена. `python -m voice_wheel` запускается, 23 теста зелёные.
+**Было:** наш пакет назывался `platform`, как stdlib-модуль `platform`. Работало (absolute import в Py3 берёт stdlib), но footgun.
 
 ### A8 — `Clipboard` Protocol 🟡 P3 ✅ (сделано)
 **Результат:** объявил `ClipboardReader(Protocol)` прямо в `core/pipeline.py` (рядом с потребителем) — один метод `read_text() -> str | None`, ровно та поверхность, что нужна пайплайну (он читает контекст, но не пишет — запись/restore остаётся у вызывающего). `Pipeline.__init__` теперь аннотирован `clipboard: ClipboardReader` вместо duck-typing. Контракт явный, `core` по-прежнему не знает про платформенный `Clipboard`. Платформенный класс ему структурно соответствует — без наследования.
