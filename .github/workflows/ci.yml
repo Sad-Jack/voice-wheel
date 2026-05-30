@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # The platform layer is PyObjC (macOS-only) and the heavy STT/audio deps
+      # are Apple-Silicon specific, so CI installs only the linter + test runner.
+      # The core/ package imports nothing heavy at module load, and the AppKit
+      # test self-skips via pytest.importorskip, so the core suite runs anywhere.
+      - name: Install dev tools
+        run: pip install ruff pytest
+
+      - name: Ruff (lint)
+        run: ruff check src tests
+
+      - name: Pytest (core suite)
+        run: PYTHONPATH=src pytest tests/ -q

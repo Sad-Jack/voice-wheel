@@ -1,4 +1,4 @@
-from voice_wheel.history import History
+from voice_wheel.core.history import History
 
 
 def test_add_and_recent_newest_first(tmp_path):

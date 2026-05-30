@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 APP_NAME = "VoiceWheel"
 
@@ -31,7 +31,7 @@ class HotkeyConfig:
 
 @dataclass(frozen=True)
 class STTConfig:
-    backend: str = "mlx"  # 'mlx' | 'faster-whisper'
+    backend: str = "auto"  # 'auto' (mlx on Apple Silicon, else faster-whisper) | 'mlx' | 'faster-whisper'
     model: str = "small"
     fallback: str = "faster-whisper"
 
@@ -51,6 +51,13 @@ class DefaultMode:
     sector: str = "normalize"  # 'normalize' | 'formal' | 'short' | 'friendly'
 
 
+@dataclass(frozen=True)
+class TTSConfig:
+    enabled: bool = True
+    voice: str = ""  # exact voice name to force (e.g. "Milena"); empty = best for the language
+    hotkey: HotkeyConfig = field(default_factory=lambda: HotkeyConfig(kind="mouse_side", key="4"))
+
+
 @dataclass
 class Config:
     hotkey: HotkeyConfig = field(default_factory=HotkeyConfig)
@@ -58,13 +65,16 @@ class Config:
     stt: STTConfig = field(default_factory=STTConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
     default_mode: DefaultMode = field(default_factory=DefaultMode)
+    tts: TTSConfig = field(default_factory=TTSConfig)
+    sector_models: dict = field(default_factory=dict)  # sector_key -> {backend, model}
+    concurrent: bool = False  # allow recording a new one while a previous is processing
     max_context_chars: int = 6000
     auto_paste: bool = False
     history_limit: int = 10
-    source_path: Optional[Path] = None
+    source_path: Path | None = None
 
     @classmethod
-    def load(cls, path: Optional[Path] = None) -> "Config":
+    def load(cls, path: Path | None = None) -> Config:
         """Load from ``path`` or auto-discover config.json / config.example.json."""
         path = path or _discover_config_path()
         raw: dict[str, Any] = {}
@@ -79,11 +89,41 @@ class Config:
             stt=STTConfig(**_pick(raw.get("stt"), STTConfig)),
             llm=LLMConfig(**_pick(raw.get("llm"), LLMConfig)),
             default_mode=DefaultMode(**_pick(raw.get("default_mode"), DefaultMode)),
+            tts=_parse_tts(raw.get("tts")),
+            sector_models=_parse_sector_models(raw.get("sector_models")),
+            concurrent=bool(raw.get("concurrent", False)),
             max_context_chars=int(raw.get("max_context_chars", 6000)),
             auto_paste=bool(raw.get("auto_paste", False)),
             history_limit=int(raw.get("history_limit", 10)),
             source_path=path,
         )
+
+
+def _parse_sector_models(section: Any) -> dict:
+    """Keep only {sector_key: {backend, model}} entries (drop _comment etc.)."""
+    if not isinstance(section, dict):
+        return {}
+    out = {}
+    for k, v in section.items():
+        if not k.startswith("_") and isinstance(v, dict):
+            out[k] = {kk: vv for kk, vv in v.items() if kk in ("backend", "model")}
+    return out
+
+
+def _parse_tts(section: Any) -> TTSConfig:
+    if not isinstance(section, dict):
+        return TTSConfig()
+    hk = section.get("hotkey")
+    hotkey = (
+        HotkeyConfig(**_pick(hk, HotkeyConfig))
+        if isinstance(hk, dict)
+        else HotkeyConfig(kind="mouse_side", key="4")
+    )
+    return TTSConfig(
+        enabled=bool(section.get("enabled", True)),
+        voice=str(section.get("voice", "")),
+        hotkey=hotkey,
+    )
 
 
 def _pick(section: Any, dc_type: type) -> dict[str, Any]:
@@ -94,7 +134,7 @@ def _pick(section: Any, dc_type: type) -> dict[str, Any]:
     return {k: v for k, v in section.items() if k in allowed}
 
 
-def _discover_config_path() -> Optional[Path]:
+def _discover_config_path() -> Path | None:
     root = _project_root()
     for name in ("config.json", "config.example.json"):
         candidate = root / name
@@ -104,5 +144,12 @@ def _discover_config_path() -> Optional[Path]:
 
 
 def _project_root() -> Path:
-    # src/voice_wheel/config.py -> project root is two parents up from the package.
-    return Path(__file__).resolve().parents[2]
+    """Walk up to the project root (marker: pyproject.toml / config.example.json).
+
+    Robust to where config.py lives in the package tree.
+    """
+    p = Path(__file__).resolve()
+    for parent in p.parents:
+        if (parent / "pyproject.toml").exists() or (parent / "config.example.json").exists():
+            return parent
+    return p.parents[3]  # fallback

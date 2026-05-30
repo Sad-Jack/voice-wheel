@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from voice_wheel.pipeline import Pipeline
+from voice_wheel.core.pipeline import Pipeline
 
 
 class FakeSTT:
@@ -20,7 +20,10 @@ class FakeLLM:
     def available(self):
         return self._available
 
-    def complete(self, system, user):
+    def available_for(self, sector_key):
+        return self._available
+
+    def complete(self, system, user, sector_key=None):
         self.calls.append((system, user))
         return f"LLM<<{user}>>"
 

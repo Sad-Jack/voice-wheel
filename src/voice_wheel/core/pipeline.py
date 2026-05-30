@@ -16,7 +16,7 @@ save/restore stack stays in one place.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from .modes import (
     Ring,
@@ -29,10 +29,16 @@ from .modes import (
 if TYPE_CHECKING:  # keep runtime imports light (no numpy/AppKit) for testability
     import numpy as np
 
-    from .clipboard import Clipboard
     from .config import Config
     from .llm import LLMClient
     from .stt import STTEngine
+
+
+class ClipboardReader(Protocol):
+    """The only thing the pipeline needs from a platform clipboard (read context)."""
+
+    def read_text(self) -> str | None:
+        ...
 
 
 @dataclass(frozen=True)
@@ -43,7 +49,8 @@ class PipelineResult:
     result: str
     used_context: bool = False
     context_truncated: bool = False
-    llm_skipped: bool = False  # an LLM ring degraded to raw transcript
+    llm_skipped: bool = False  # an LLM ring degraded to raw transcript (no backend)
+    error: str | None = None   # STT/LLM failed; result falls back to transcript
 
 
 class Pipeline:
@@ -51,7 +58,7 @@ class Pipeline:
         self,
         stt: STTEngine,
         llm: LLMClient,
-        clipboard: Clipboard,
+        clipboard: ClipboardReader,  # platform clipboard (read context before overwrite)
         config: Config,
     ) -> None:
         self._stt = stt
@@ -63,10 +70,16 @@ class Pipeline:
         ring_e = normalize_ring(ring)
         sector = normalize_sector(sector)
 
-        transcript = self._stt.transcribe(audio, self._config.language)
+        try:
+            transcript = self._stt.transcribe(audio, self._config.language)
+        except Exception as exc:  # noqa: BLE001 - surface as a failure, never crash
+            return PipelineResult(
+                ring=ring_e.value, sector=sector, transcript="", result="",
+                error=f"STT: {exc}",
+            )
 
-        # Dictate, or LLM unavailable -> return the raw transcript.
-        if ring_e is Ring.DICTATE or not self._llm.available:
+        # Dictate, or the sector's LLM backend is unavailable -> raw transcript.
+        if ring_e is Ring.DICTATE or not self._llm.available_for(sector):
             return PipelineResult(
                 ring=ring_e.value,
                 sector=sector,
@@ -86,7 +99,15 @@ class Pipeline:
 
         system = build_system_prompt(ring_e, sector)
         user = build_user_message(transcript, context)
-        result = self._llm.complete(system, user)
+        try:
+            result = self._llm.complete(system, user, sector)
+        except Exception as exc:  # noqa: BLE001 - keep the dictation, don't lose it
+            return PipelineResult(
+                ring=ring_e.value, sector=sector, transcript=transcript,
+                result=transcript,  # fallback: at least keep what was said
+                used_context=ring_e is Ring.CONTEXT, context_truncated=truncated,
+                error=str(exc),
+            )
 
         return PipelineResult(
             ring=ring_e.value,
