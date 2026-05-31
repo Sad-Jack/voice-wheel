@@ -32,6 +32,7 @@ from AppKit import (
     NSBackingStoreBuffered,
     NSButton,
     NSColor,
+    NSComboBox,
     NSEvent,
     NSEventMaskKeyDown,
     NSEventMaskOtherMouseDown,
@@ -141,6 +142,12 @@ LLM_BACKENDS = [
 ]
 STT_BACKENDS = ["auto", "mlx", "faster-whisper"]
 STT_MODELS = ["tiny", "base", "small", "medium", "large"]
+# Recommended models per connection (#39). The combos are editable — these are
+# just suggestions in the dropdown; a custom model can still be typed.
+OLLAMA_MODELS = ["qwen2.5:7b", "qwen2.5:3b", "llama3.1:8b", "qwen2.5:14b"]
+ANTHROPIC_MODELS = ["claude-haiku-4-5", "claude-sonnet-4-5"]
+OPENAI_MODELS = ["gpt-4o-mini", "gpt-4o"]
+CC_MODELS = ["claude-haiku-4-5", "claude-sonnet-4-5"]
 LANGS = ["auto", "ru", "en"]
 KINDS = ["mouse_side", "keyboard", "mouse"]
 MS_KINDS = ["mouse_side", "mouse"]  # the mouse row's kinds (keyboard has its own row)
@@ -192,6 +199,7 @@ class SettingsWindow(NSObject):
             self._dirty = False           # any unsaved change? drives the Save button state
             self._save_btn = None
             self._tabs = None
+            self._pull_result = None      # (ok, model) handoff from the ollama-pull thread
         return self
 
     @objc.python_method
@@ -330,6 +338,14 @@ class SettingsWindow(NSObject):
             t.widthAnchor().constraintEqualToConstant_(w).setActive_(True)
             return t
 
+        def combo(items, w=300):
+            # editable: pick a recommendation from the dropdown, or type a custom one
+            c = NSComboBox.alloc().initWithFrame_(NSMakeRect(0, 0, w, 26))
+            c.addItemsWithObjectValues_(items)
+            c.setCompletes_(True)
+            c.widthAnchor().constraintEqualToConstant_(w).setActive_(True)
+            return c
+
         def checkbox(key):
             return NSButton.checkboxWithTitle_target_action_(T(key), None, None)
 
@@ -367,16 +383,17 @@ class SettingsWindow(NSObject):
         row("provider", self._provider)
         self._api_key = field()
         row("api_key", self._api_key)
-        self._api_model = field()
+        self._api_model = combo(ANTHROPIC_MODELS)  # provider switch updates the list
         row("model", self._api_model)
         hint("api_key_hint")
         stack[0] = prev
 
-        # -- Ollama group: model + URL --
+        # -- Ollama group: model (with «Download») + URL --
         self._grp_ollama = group()
         prev, stack[0] = stack[0], self._grp_ollama
-        self._ollama = field()
-        row("model", self._ollama)
+        self._ollama = combo(OLLAMA_MODELS, w=190)
+        self._dl_ollama = button("download", "downloadOllama:", 100)
+        row("model", self._ollama, self._dl_ollama)
         self._ollama_url = field()
         row("ollama_url", self._ollama_url)
         hint("ollama_hint")
@@ -385,7 +402,7 @@ class SettingsWindow(NSObject):
         # -- Claude Code group: model --
         self._grp_cc = group()
         prev, stack[0] = stack[0], self._grp_cc
-        self._cc_model = field()
+        self._cc_model = combo(CC_MODELS)
         row("model", self._cc_model)
         hint("cc_hint")
         stack[0] = prev
@@ -519,6 +536,9 @@ class SettingsWindow(NSObject):
     def controlTextDidChange_(self, _notif):  # noqa: N802
         self._set_dirty(True)
 
+    def comboBoxSelectionDidChange_(self, _notif):  # noqa: N802
+        self._set_dirty(True)  # picking a recommendation from a model combo
+
     # -- trigger rows (keyboard + mouse, both live; #54) ----------------------
 
     @objc.python_method
@@ -594,6 +614,7 @@ class SettingsWindow(NSObject):
         for rb, tkey in self._conn_radios:
             rb.setState_(1 if tkey == ctype else 0)
         self._provider.selectItemWithTitle_("OpenAI" if backend == "openai" else "Anthropic")
+        self._refresh_api_models()
         self._api_model.setStringValue_(str(llm.get("model", "claude-haiku-4-5")))
         self._cc_model.setStringValue_(str(llm.get("model", "claude-haiku-4-5")))
         self._ollama.setStringValue_(str(llm.get("ollama_model", "qwen2.5:7b")))
@@ -765,10 +786,57 @@ class SettingsWindow(NSObject):
         self._apply_conn_visibility()
         self._set_dirty(True)
 
+    @objc.python_method
+    def _provider_models(self):
+        return OPENAI_MODELS if str(self._provider.titleOfSelectedItem()) == "OpenAI" else ANTHROPIC_MODELS
+
+    @objc.python_method
+    def _refresh_api_models(self):
+        self._api_model.removeAllItems()
+        self._api_model.addItemsWithObjectValues_(self._provider_models())
+
     def providerChanged_(self, _sender):  # noqa: N802
-        # show the key stored for the just-selected provider
+        self._refresh_api_models()
+        self._api_model.setStringValue_(self._provider_models()[0])  # provider changed -> its default
         self._api_key.setStringValue_(self._read_env().get(self._provider_env_var(), ""))
         self._set_dirty(True)
+
+    # -- Ollama model download (#39) ------------------------------------------
+
+    def downloadOllama_(self, _sender):  # noqa: N802
+        model = str(self._ollama.stringValue()).strip()
+        if not model:
+            return
+        self._note.setStringValue_(self._t("note_ollama_pull").format(model))
+        threading.Thread(target=self._pull_ollama, args=(model,), daemon=True).start()
+
+    @objc.python_method
+    def _pull_ollama(self, model):
+        import subprocess
+
+        ok = False
+        try:
+            proc = subprocess.run(
+                ["ollama", "pull", model], capture_output=True, text=True, timeout=1800
+            )
+            ok = proc.returncode == 0
+            if not ok:
+                log.warning("ollama pull %s: %s", model, (proc.stderr or proc.stdout or "")[:200])
+        except Exception as exc:  # noqa: BLE001 - ollama missing / not running / timeout
+            log.warning("ollama pull %s failed: %s", model, exc)
+        self._pull_result = (ok, model)
+        self.performSelectorOnMainThread_withObject_waitUntilDone_("ollamaPullDone:", None, False)
+
+    def ollamaPullDone_(self, _arg):  # noqa: N802
+        ok, model = self._pull_result
+        self._note.setStringValue_(
+            self._t("note_ollama_pulled" if ok else "note_ollama_pull_fail").format(model)
+        )
+        if ok:  # make sure the freshly-pulled model is offered in the dropdown
+            have = [str(self._ollama.itemObjectValueAtIndex_(i))
+                    for i in range(self._ollama.numberOfItems())]
+            if model not in have:
+                self._ollama.addItemWithObjectValue_(model)
 
     # -- API key storage in .env (#38) ----------------------------------------
 
@@ -888,6 +956,7 @@ class SettingsWindow(NSObject):
         for rb, tkey in self._conn_radios:
             rb.setState_(1 if tkey == _conn_type_of(d.backend) else 0)
         self._provider.selectItemWithTitle_("Anthropic")
+        self._refresh_api_models()
         self._api_model.setStringValue_(d.model)
         self._cc_model.setStringValue_(d.model)
         self._ollama.setStringValue_(d.ollama_model)
