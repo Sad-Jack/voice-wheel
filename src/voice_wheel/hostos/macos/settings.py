@@ -4,6 +4,10 @@ Opened from the menu-bar. The app is an accessory (no Dock icon); while the
 settings window is open we switch to a regular activation policy so it can take
 focus, and switch back when it closes. Save writes config.json (other keys, like
 sector_models, are preserved); changes apply on the next app restart.
+
+Layout is grouped into labelled sections (LLM / STT / Voice / Triggers / Other),
+backends are shown with human-readable labels (not raw config values), and the
+model field that doesn't apply to the chosen LLM backend is hidden.
 """
 
 from __future__ import annotations
@@ -33,7 +37,13 @@ from ...core.config import _project_root
 
 log = logging.getLogger(__name__)
 
-BACKENDS = ["ollama", "claude_warm", "anthropic", "claude_cli"]
+# (human label, config value) — the LLM backend picker shows the label, stores the value.
+LLM_BACKENDS = [
+    ("Локально — Ollama (бесплатно, без ключа)", "ollama"),
+    ("Claude Max (подписка)", "claude_warm"),
+    ("Claude API (нужен ключ)", "anthropic"),
+    ("Claude CLI", "claude_cli"),
+]
 STT_BACKENDS = ["auto", "mlx", "faster-whisper"]
 LANGS = ["ru", "en", "auto"]
 KINDS = ["mouse_side", "keyboard", "mouse"]
@@ -46,8 +56,8 @@ TTS_VOICES = [
     ("Piper: Руслан — нейро (RU, муж.)", "piper", "ru_RU-ruslan-medium"),
     ("Piper: Дмитрий — нейро (RU, муж.)", "piper", "ru_RU-dmitri-medium"),
 ]
-W = 480
-H = 700
+W = 500
+H = 720
 
 
 class SettingsWindow(NSObject):
@@ -72,7 +82,7 @@ class SettingsWindow(NSObject):
     # -- build ----------------------------------------------------------------
 
     @objc.python_method
-    def _build(self):
+    def _build(self):  # noqa: C901 - flat UI construction, easier read top-to-bottom
         if self._window is not None:
             return
         win = NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
@@ -85,68 +95,113 @@ class SettingsWindow(NSObject):
         win.setReleasedWhenClosed_(False)
         win.setDelegate_(self)
         content = win.contentView()
+        cur = [H - 36]  # y cursor, top-down
 
-        def label(text, yy, x=24, w=150, size=12, bold=False):
-            f = NSTextField.labelWithString_(text)
-            f.setFrame_(NSMakeRect(x, yy, w, 20))
+        def text(s, x, w, size, bold=False, color=None):
+            f = NSTextField.labelWithString_(s)
+            f.setFrame_(NSMakeRect(x, cur[0], w, 20))
             f.setFont_(NSFont.boldSystemFontOfSize_(size) if bold else NSFont.systemFontOfSize_(size))
+            if color is not None:
+                f.setTextColor_(color)
             content.addSubview_(f)
             return f
 
-        def popup(items, yy, x=180, w=270):
-            p = NSPopUpButton.alloc().initWithFrame_pullsDown_(NSMakeRect(x, yy - 3, w, 26), False)
+        def header(s):
+            cur[0] -= 30
+            text(s, 20, W - 40, 13, bold=True)
+            cur[0] -= 4
+
+        def hint(s):
+            cur[0] -= 17
+            text(s, 40, W - 60, 10, color=NSColor.secondaryLabelColor())
+
+        def rowlabel(s, x=40, w=150):
+            return text(s, x, w, 12)
+
+        def popup(items, x=200, w=270):
+            p = NSPopUpButton.alloc().initWithFrame_pullsDown_(NSMakeRect(x, cur[0] - 3, w, 26), False)
             p.addItemsWithTitles_(items)
             content.addSubview_(p)
             return p
 
-        def field(yy, x=180, w=270):
-            t = NSTextField.alloc().initWithFrame_(NSMakeRect(x, yy - 2, w, 24))
+        def field(x=200, w=270):
+            t = NSTextField.alloc().initWithFrame_(NSMakeRect(x, cur[0] - 2, w, 24))
             content.addSubview_(t)
             return t
 
-        def checkbox(text, yy, x=180):
-            b = NSButton.checkboxWithTitle_target_action_(text, None, None)
-            b.setFrame_(NSMakeRect(x, yy - 2, 270, 22))
+        def checkbox(s, x=40):
+            b = NSButton.checkboxWithTitle_target_action_(s, None, None)
+            b.setFrame_(NSMakeRect(x, cur[0] - 2, W - 80, 22))
             content.addSubview_(b)
             return b
 
-        y = H - 42
-        label("Настройки", y, x=24, w=300, size=17, bold=True)
-        y -= 42
-        label("LLM backend", y); self._backend = popup(BACKENDS, y); y -= 38
-        label("Ollama модель", y); self._ollama = field(y); y -= 38
-        label("Claude модель", y); self._claude = field(y); y -= 38
-        label("STT движок", y); self._stt_backend = popup(STT_BACKENDS, y); y -= 38
-        label("STT модель", y); self._stt_model = field(y); y -= 38
-        label("Язык", y); self._lang = popup(LANGS, y); y -= 42
-        label("Триггер колеса", y)
-        self._wheel_kind = popup(KINDS, y, x=180, w=140)
-        self._wheel_key = field(y, x=330, w=120)
-        y -= 38
-        label("Триггер озвучки", y)
-        self._tts_kind = popup(KINDS, y, x=180, w=140)
-        self._tts_key = field(y, x=330, w=120)
-        y -= 38
-        label("Голос (TTS)", y)
-        self._tts_voice = popup([v[0] for v in TTS_VOICES], y)
-        y -= 34
+        def gap(px=34):
+            cur[0] -= px
+
+        text("Настройки", 20, 300, 17, bold=True)
+
+        header("🧠 Обработка речи (LLM)")
+        rowlabel("Движок")
+        self._backend = popup([lbl for lbl, _ in LLM_BACKENDS])
+        self._backend.setTarget_(self)
+        self._backend.setAction_("llmBackendChanged:")
+        hint("Что превращает распознанную речь в результат под промпт сектора.")
+        gap()
+        # The two model fields share one slot — only the relevant one is shown.
+        self._ollama_label = rowlabel("Модель Ollama")
+        self._ollama = field()
+        self._claude_label = rowlabel("Модель Claude")
+        self._claude = field()
+        gap()
+
+        header("🎙 Распознавание (речь → текст)")
+        rowlabel("Движок")
+        self._stt_backend = popup(STT_BACKENDS)
+        gap()
+        rowlabel("Модель")
+        self._stt_model = field()
+        hint("tiny / base / small / medium — точность ↔ скорость. small — оптимум для русского.")
+        gap()
+        rowlabel("Язык")
+        self._lang = popup(LANGS)
+        gap()
+
+        header("🔊 Голос (озвучка)")
+        rowlabel("Голос")
+        self._tts_voice = popup([v[0] for v in TTS_VOICES])
+        gap()
         prem = NSButton.buttonWithTitle_target_action_(
             "macOS: скачать премиум-голоса…", self, "downloadPremium:"
         )
-        prem.setFrame_(NSMakeRect(180, y - 2, 270, 24))
+        prem.setFrame_(NSMakeRect(200, cur[0] - 2, 270, 24))
         content.addSubview_(prem)
-        y -= 38
-        self._tts_enabled = checkbox("Озвучка включена", y); y -= 30
-        self._concurrent = checkbox("Запись во время обработки", y); y -= 40
+        gap(32)
+        self._tts_enabled = checkbox("Озвучка включена")
+        gap(30)
 
-        self._note = label("", y, x=24, w=W - 48, size=11)
-        self._note.setTextColor_(NSColor.secondaryLabelColor())
+        header("⌨️ Триггеры")
+        rowlabel("Колесо записи")
+        self._wheel_kind = popup(KINDS, x=200, w=140)
+        self._wheel_key = field(x=350, w=120)
+        gap()
+        rowlabel("Озвучка")
+        self._tts_kind = popup(KINDS, x=200, w=140)
+        self._tts_key = field(x=350, w=120)
+        hint("вид + кнопка/клавиша: mouse_side + 3 или 4, либо keyboard + f8, либо mouse + left.")
+        gap()
+
+        header("⚙️ Прочее")
+        self._concurrent = checkbox("Запись во время обработки (concurrent)")
+        gap(30)
+
+        self._note = text("", 20, W - 40, 11, color=NSColor.secondaryLabelColor())
 
         save = NSButton.buttonWithTitle_target_action_("Сохранить", self, "save:")
         save.setFrame_(NSMakeRect(W - 140, 16, 120, 30))
         content.addSubview_(save)
 
         self._window = win
+        self._apply_llm_visibility("ollama")  # _load re-applies with the saved value
 
     # -- load / save ----------------------------------------------------------
 
@@ -171,7 +226,9 @@ class SettingsWindow(NSObject):
         hk = data.get("hotkey", {})
         tts = data.get("tts", {})
         tts_hk = tts.get("hotkey", {})
-        self._backend.selectItemWithTitle_(llm.get("backend", "ollama"))
+        backend = llm.get("backend", "ollama")
+        self._backend.selectItemWithTitle_(self._llm_label(backend))
+        self._apply_llm_visibility(backend)
         self._ollama.setStringValue_(str(llm.get("ollama_model", "qwen2.5:7b")))
         self._claude.setStringValue_(str(llm.get("model", "claude-haiku-4-5")))
         stt = data.get("stt", {})
@@ -190,7 +247,7 @@ class SettingsWindow(NSObject):
     def save_(self, _sender):  # noqa: N802
         data = self._read()
         data.setdefault("llm", {})
-        data["llm"]["backend"] = str(self._backend.titleOfSelectedItem())
+        data["llm"]["backend"] = self._llm_value(str(self._backend.titleOfSelectedItem()))
         data["llm"]["ollama_model"] = str(self._ollama.stringValue())
         data["llm"]["model"] = str(self._claude.stringValue())
         data.setdefault("stt", {})
@@ -223,6 +280,34 @@ class SettingsWindow(NSObject):
         self._note.setStringValue_("Сохранено. Перезапусти приложение (меню-бар → Выход, затем ./run.sh).")
         if backend == "piper":
             self._maybe_download_piper(piper_voice)
+
+    # -- LLM backend helpers --------------------------------------------------
+
+    @objc.python_method
+    def _llm_label(self, value: str) -> str:
+        for lbl, v in LLM_BACKENDS:
+            if v == value:
+                return lbl
+        return LLM_BACKENDS[0][0]
+
+    @objc.python_method
+    def _llm_value(self, label: str) -> str:
+        for lbl, v in LLM_BACKENDS:
+            if lbl == label:
+                return v
+        return "ollama"
+
+    @objc.python_method
+    def _apply_llm_visibility(self, backend: str):
+        """Show only the model field that applies to the chosen backend."""
+        is_ollama = backend == "ollama"
+        self._ollama_label.setHidden_(not is_ollama)
+        self._ollama.setHidden_(not is_ollama)
+        self._claude_label.setHidden_(is_ollama)
+        self._claude.setHidden_(is_ollama)
+
+    def llmBackendChanged_(self, _sender):  # noqa: N802
+        self._apply_llm_visibility(self._llm_value(str(self._backend.titleOfSelectedItem())))
 
     # -- TTS voice helpers ----------------------------------------------------
 
