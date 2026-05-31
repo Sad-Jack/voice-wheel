@@ -63,7 +63,7 @@ from AppKit import (
 )
 from Foundation import NSMakeRect, NSObject
 
-from ...core.config import _project_root
+from ...core.config import _project_root, app_support_dir
 from ...core.modes import sectors
 from .i18n import detect_ui_lang, resolve_lang
 from .i18n import t as _tr
@@ -216,12 +216,19 @@ class SettingsWindow(NSObject):
             self._dirty = False           # any unsaved change? drives the Save button state
             self._save_btn = None
             self._tabs = None
+            self._baseline = None         # form snapshot at load -> Save = (form != baseline)
             self._pull_result = None      # (ok, model) handoff from the ollama-pull thread
         return self
 
     @objc.python_method
     def set_apply_callback(self, cb):
         self._apply_cb = cb
+
+    @objc.python_method
+    def select_tab(self, tab_id):
+        """Show a specific tab by identifier (used to restore the tab after a restart)."""
+        if self._tabs is not None and tab_id:
+            self._tabs.selectTabViewItemWithIdentifier_(tab_id)
 
     @objc.python_method
     def set_restart_callback(self, cb):
@@ -518,10 +525,10 @@ class SettingsWindow(NSObject):
 
         # ---- Language tab ----
         add_tab("tab_lang")
-        header("lang_header")
+        header("lang_header")  # 🌐 Язык интерфейса — the dropdown sits right under it
         self._uilang_popup = popup(["Русский", "English"], w=200)
         self._uilang_popup.selectItemAtIndex_(0 if self._uilang == "ru" else 1)
-        row("lang_row", self._uilang_popup)
+        stack[0].addArrangedSubview_(self._uilang_popup)
         hint("lang_hint")
         hint("lang_restart_warn")
 
@@ -548,7 +555,7 @@ class SettingsWindow(NSObject):
         self._apply_conn_visibility()
         self._wire_dirty()
         self._set_tooltips()
-        self._set_dirty(False)
+        self._capture_baseline()
 
     @objc.python_method
     def _set_tooltips(self):
@@ -600,14 +607,34 @@ class SettingsWindow(NSObject):
         self._save_btn.setEnabled_(self._dirty)
         self._save_btn.setBezelColor_(NSColor.systemGreenColor() if self._dirty else None)
 
+    @objc.python_method
+    def _full_snapshot(self):
+        """The whole form's saveable state — every tab's snapshot + the API key."""
+        return tuple(
+            self._tab_snapshot(t)
+            for t in ("tab_llm", "tab_stt", "tab_voice", "tab_triggers", "tab_lang")
+        )
+
+    @objc.python_method
+    def _capture_baseline(self):
+        """Remember the current form as the 'saved' state; Save goes disabled."""
+        self._baseline = self._full_snapshot()
+        self._set_dirty(False)
+
+    @objc.python_method
+    def _recompute_dirty(self):
+        """Save reflects whether the form actually differs from the saved state, so
+        reverting a change (or a reset that lands back on the saved values) disarms it."""
+        self._set_dirty(self._full_snapshot() != self._baseline)
+
     def markDirty_(self, _sender):  # noqa: N802
-        self._set_dirty(True)
+        self._recompute_dirty()
 
     def controlTextDidChange_(self, _notif):  # noqa: N802
-        self._set_dirty(True)
+        self._recompute_dirty()
 
     def comboBoxSelectionDidChange_(self, _notif):  # noqa: N802
-        self._set_dirty(True)  # picking a recommendation from a model combo
+        self._recompute_dirty()  # picking a recommendation from a model combo
 
     # -- trigger rows (keyboard + mouse, both live; #54) ----------------------
 
@@ -751,7 +778,7 @@ class SettingsWindow(NSObject):
                 self._make_rule_row(key, ov.get("backend", "ollama"), ov.get("model", ""))
         self._refresh_add_button()
         self._note.setStringValue_("")
-        self._set_dirty(False)
+        self._capture_baseline()
 
     def save_(self, _sender):  # noqa: N802
         old = self._read()
@@ -827,6 +854,12 @@ class SettingsWindow(NSObject):
             or str(old.get("stt", {}).get("model", "small")) != data["stt"]["model"]
         )
         if needs_restart and self._restart_cb is not None:
+            try:  # so the restarted app can reopen settings on the tab we were on
+                (app_support_dir() / "reopen_settings").write_text(
+                    str(self._tabs.selectedTabViewItem().identifier()), encoding="utf-8"
+                )
+            except OSError as exc:
+                log.debug("could not write reopen marker: %s", exc)
             self._note.setStringValue_(self._t("note_restarting"))
             self._set_dirty(False)
             self._restart_cb()  # cleans up + re-execs; does not return
@@ -837,7 +870,7 @@ class SettingsWindow(NSObject):
             except Exception as exc:  # noqa: BLE001 - never let live-apply break Save
                 log.warning("live-apply failed: %s", exc)
         self._note.setStringValue_("")
-        self._set_dirty(False)
+        self._capture_baseline()  # the just-saved form is the new baseline
         if backend == "piper":
             self._maybe_download_piper(piper_voice)
 
@@ -901,7 +934,7 @@ class SettingsWindow(NSObject):
         self._apply_conn_visibility()
         if self._selected_conn_type() == "ollama":
             self._start_ollama_check()
-        self._set_dirty(True)
+        self._recompute_dirty()
 
     @objc.python_method
     def _provider_models(self):
@@ -916,7 +949,7 @@ class SettingsWindow(NSObject):
         self._refresh_api_models()
         self._api_model.setStringValue_(self._provider_models()[0])  # provider changed -> its default
         self._api_key.setStringValue_(self._read_env().get(self._provider_env_var(), ""))
-        self._set_dirty(True)
+        self._recompute_dirty()
 
     # -- Ollama model download (#39) ------------------------------------------
 
@@ -1110,10 +1143,10 @@ class SettingsWindow(NSObject):
         }.get(ident)
         if reset is None:
             return
-        before = self._tab_snapshot(ident)
         reset(_sender)
-        if self._tab_snapshot(ident) != before:  # only a real change arms Save
-            self._set_dirty(True)
+        # Save reflects the whole form vs the saved baseline, so a reset that lands
+        # back on the saved values leaves Save disabled (nothing to save).
+        self._recompute_dirty()
 
     @objc.python_method
     def _tab_snapshot(self, ident):
@@ -1126,8 +1159,9 @@ class SettingsWindow(NSObject):
                 for r in self._rules
             )
             return (self._selected_conn_type(), str(self._provider.titleOfSelectedItem()),
-                    str(self._api_model.stringValue()), str(self._ollama.stringValue()),
-                    str(self._ollama_url.stringValue()), str(self._cc_model.stringValue()), rules)
+                    str(self._api_key.stringValue()), str(self._api_model.stringValue()),
+                    str(self._ollama.stringValue()), str(self._ollama_url.stringValue()),
+                    str(self._cc_model.stringValue()), rules)
         if ident == "tab_stt":
             return (str(self._stt_backend.titleOfSelectedItem()),
                     str(self._stt_model.titleOfSelectedItem()),
@@ -1254,7 +1288,7 @@ class SettingsWindow(NSObject):
         # default a new rule to the base connection's backend + model
         self._make_rule_row(key, self._current_backend(), self._current_model())
         self._refresh_add_button()
-        self._set_dirty(True)
+        self._recompute_dirty()
 
     def deleteRule_(self, sender):  # noqa: N802
         rule = next((r for r in self._rules if r["delete"] == sender), None)
@@ -1263,7 +1297,7 @@ class SettingsWindow(NSObject):
         self._rules_stack.removeView_(rule["row"])
         self._rules.remove(rule)
         self._refresh_add_button()
-        self._set_dirty(True)
+        self._recompute_dirty()
 
     @objc.python_method
     def _refresh_trigger_states(self):
@@ -1287,11 +1321,11 @@ class SettingsWindow(NSObject):
 
     def triggerToggled_(self, _sender):  # noqa: N802
         self._refresh_trigger_states()
-        self._set_dirty(True)
+        self._recompute_dirty()
 
     def ttsEnabledChanged_(self, _sender):  # noqa: N802
         self._refresh_trigger_states()
-        self._set_dirty(True)
+        self._recompute_dirty()
 
     # -- key capture ("Поймать") ---------------------------------------------
     # Two flavours: keyboard-only (writes a combo into the keyboard field) and
@@ -1338,7 +1372,7 @@ class SettingsWindow(NSObject):
             if kind != "cancel" and kind in wanted:
                 write(kind, key)
                 self._note.setStringValue_(self._t("note_capture_caught").format(kind, key))
-                self._set_dirty(True)
+                self._recompute_dirty()
             elif kind != "cancel":
                 return None  # wrong device for this row — keep waiting
             if self._capture_monitor is not None:
@@ -1353,7 +1387,7 @@ class SettingsWindow(NSObject):
 
     def ttsVoiceChanged_(self, _sender):  # noqa: N802
         self._preview_voice()
-        self._set_dirty(True)
+        self._recompute_dirty()
 
     @objc.python_method
     def _preview_voice(self):
