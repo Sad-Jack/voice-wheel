@@ -120,7 +120,8 @@ LLM_BACKENDS = [
     ("Claude CLI", "claude_cli"),
 ]
 STT_BACKENDS = ["auto", "mlx", "faster-whisper"]
-LANGS = ["ru", "en", "auto"]
+STT_MODELS = ["tiny", "base", "small", "medium", "large"]
+LANGS = ["auto", "ru", "en"]
 KINDS = ["mouse_side", "keyboard", "mouse"]
 # TTS voice picker: (label, backend, piper_voice). "system" = macOS voices (auto-picks
 # the best installed quality); "piper" = local neural, auto-downloaded on save/first use.
@@ -274,13 +275,15 @@ class SettingsWindow(NSObject):
         header("🎙 Распознавание (речь → текст)")
         rowlabel("Движок")
         self._stt_backend = popup(STT_BACKENDS)
+        hint("Чем распознаём речь. auto: mlx на Apple Silicon, иначе faster-whisper (можно не трогать).")
         gap()
         rowlabel("Модель")
-        self._stt_model = field()
-        hint("tiny / base / small / medium — точность ↔ скорость. small — оптимум для русского.")
+        self._stt_model = popup(STT_MODELS)
+        hint("tiny → быстро/грубо · medium/large → точно/медленно. small — оптимум для русского.")
         gap()
         rowlabel("Язык")
         self._lang = popup(LANGS)
+        hint("auto — определять язык по речи. Или зафиксируй ru/en для точности.")
 
         # ---- Voice (TTS) tab ----
         add_tab("Голос")
@@ -358,7 +361,7 @@ class SettingsWindow(NSObject):
         self._claude.setStringValue_(str(llm.get("model", "claude-haiku-4-5")))
         stt = data.get("stt", {})
         self._stt_backend.selectItemWithTitle_(stt.get("backend", "auto"))
-        self._stt_model.setStringValue_(str(stt.get("model", "small")))
+        self._stt_model.selectItemWithTitle_(str(stt.get("model", "small")))
         self._lang.selectItemWithTitle_(data.get("language", "ru"))
         self._wheel_kind.selectItemWithTitle_(hk.get("kind", "mouse_side"))
         self._wheel_key.setStringValue_(str(hk.get("key", "3")))
@@ -386,7 +389,7 @@ class SettingsWindow(NSObject):
         data["llm"]["model"] = str(self._claude.stringValue())
         data.setdefault("stt", {})
         data["stt"]["backend"] = str(self._stt_backend.titleOfSelectedItem())
-        data["stt"]["model"] = str(self._stt_model.stringValue())
+        data["stt"]["model"] = str(self._stt_model.titleOfSelectedItem())
         data["language"] = str(self._lang.titleOfSelectedItem())
         data["hotkey"] = {
             "kind": str(self._wheel_kind.titleOfSelectedItem()),
