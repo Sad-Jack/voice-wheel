@@ -2,12 +2,11 @@
 
 Opened from the menu-bar. The app is an accessory (no Dock icon); while the
 settings window is open we switch to a regular activation policy so it can take
-focus, and switch back when it closes. Save writes config.json (other keys, like
-sector_models, are preserved); changes apply on the next app restart.
+focus, and switch back when it closes. Save writes config.json (other keys are
+preserved); cheap settings apply live, the rest on the next restart.
 
-Layout is grouped into labelled sections (LLM / STT / Voice / Triggers / Other),
-backends are shown with human-readable labels (not raw config values), and the
-model field that doesn't apply to the chosen LLM backend is hidden.
+The window is split into tabs (LLM / Речь / Голос / Триггеры) so it stays short
+and the Save button is always visible below the tabs.
 """
 
 from __future__ import annotations
@@ -35,7 +34,10 @@ from AppKit import (
     NSEventTypeKeyDown,
     NSFont,
     NSPopUpButton,
+    NSTabView,
+    NSTabViewItem,
     NSTextField,
+    NSView,
     NSWindow,
     NSWindowStyleMaskClosable,
     NSWindowStyleMaskTitled,
@@ -46,6 +48,14 @@ from ...core.config import _project_root
 from ...core.modes import sectors
 
 log = logging.getLogger(__name__)
+
+
+class _FlippedView(NSView):
+    """Top-left origin so tab content lays out top-to-bottom regardless of height."""
+
+    def isFlipped(self):  # noqa: N802
+        return True
+
 
 BASE_MODEL_LABEL = "(как базовая)"  # per-prompt override = "no override, use the default LLM"
 
@@ -101,6 +111,7 @@ def _capture_kind_key(event):
         return ("keyboard", combo) if combo else (None, None)
     return _mouse_kind_key(int(event.buttonNumber()))
 
+
 # (human label, config value) — the LLM backend picker shows the label, stores the value.
 LLM_BACKENDS = [
     ("Локально — Ollama (бесплатно, без ключа)", "ollama"),
@@ -120,8 +131,8 @@ TTS_VOICES = [
     ("Piper: Руслан — нейро (RU, муж.)", "piper", "ru_RU-ruslan-medium"),
     ("Piper: Дмитрий — нейро (RU, муж.)", "piper", "ru_RU-dmitri-medium"),
 ]
-W = 500
-H = 940
+W = 520
+H = 440
 
 
 class SettingsWindow(NSObject):
@@ -167,8 +178,22 @@ class SettingsWindow(NSObject):
         win.setTitle_("Voice Wheel — Настройки")
         win.setReleasedWhenClosed_(False)
         win.setDelegate_(self)
-        content = win.contentView()
-        cur = [H - 36]  # y cursor, top-down
+        root = win.contentView()
+
+        tabs = NSTabView.alloc().initWithFrame_(NSMakeRect(10, 48, W - 20, H - 58))
+        root.addSubview_(tabs)
+
+        view = [None]   # the current tab's content view
+        cur = [14]      # y cursor inside that view (flipped: grows downward)
+
+        def add_tab(label):
+            v = _FlippedView.alloc().initWithFrame_(NSMakeRect(0, 0, W - 28, H - 96))
+            item = NSTabViewItem.alloc().initWithIdentifier_(label)
+            item.setLabel_(label)
+            item.setView_(v)
+            tabs.addTabViewItem_(item)
+            view[0] = v
+            cur[0] = 14
 
         def text(s, x, w, size, bold=False, color=None):
             f = NSTextField.labelWithString_(s)
@@ -176,43 +201,49 @@ class SettingsWindow(NSObject):
             f.setFont_(NSFont.boldSystemFontOfSize_(size) if bold else NSFont.systemFontOfSize_(size))
             if color is not None:
                 f.setTextColor_(color)
-            content.addSubview_(f)
+            view[0].addSubview_(f)
             return f
 
         def header(s):
-            cur[0] -= 24          # space above the section header
-            text(s, 20, W - 40, 13, bold=True)
-            cur[0] -= 28          # clear the header line before the first row
+            text(s, 12, W - 52, 13, bold=True)
+            cur[0] += 28
 
         def hint(s):
-            cur[0] -= 21
-            text(s, 40, W - 60, 10, color=NSColor.secondaryLabelColor())
+            cur[0] += 20
+            text(s, 34, W - 72, 10, color=NSColor.secondaryLabelColor())
+            cur[0] += 4
 
-        def rowlabel(s, x=40, w=150):
+        def rowlabel(s, x=34, w=150):
             return text(s, x, w, 12)
 
-        def popup(items, x=200, w=270):
+        def popup(items, x=190, w=290):
             p = NSPopUpButton.alloc().initWithFrame_pullsDown_(NSMakeRect(x, cur[0] - 3, w, 26), False)
             p.addItemsWithTitles_(items)
-            content.addSubview_(p)
+            view[0].addSubview_(p)
             return p
 
-        def field(x=200, w=270):
+        def field(x=190, w=290):
             t = NSTextField.alloc().initWithFrame_(NSMakeRect(x, cur[0] - 2, w, 24))
-            content.addSubview_(t)
+            view[0].addSubview_(t)
             return t
 
-        def checkbox(s, x=40):
+        def checkbox(s, x=34):
             b = NSButton.checkboxWithTitle_target_action_(s, None, None)
-            b.setFrame_(NSMakeRect(x, cur[0] - 2, W - 80, 22))
-            content.addSubview_(b)
+            b.setFrame_(NSMakeRect(x, cur[0] - 2, W - 96, 22))
+            view[0].addSubview_(b)
             return b
 
-        def gap(px=32):
-            cur[0] -= px
+        def btn(title, action, x, w):
+            b = NSButton.buttonWithTitle_target_action_(title, self, action)
+            b.setFrame_(NSMakeRect(x, cur[0] - 2, w, 24))
+            view[0].addSubview_(b)
+            return b
 
-        text("Настройки", 20, 300, 17, bold=True)
+        def gap(px=34):
+            cur[0] += px
 
+        # ---- LLM tab ----
+        add_tab("LLM")
         header("🧠 Обработка речи (LLM)")
         rowlabel("Движок")
         self._backend = popup([lbl for lbl, _ in LLM_BACKENDS])
@@ -226,7 +257,20 @@ class SettingsWindow(NSObject):
         self._claude_label = rowlabel("Модель Claude")
         self._claude = field()
         gap()
+        header("🎛 Модель на промпт (опц.)")
+        self._sectors = list(sectors())
+        rowlabel("Промпт")
+        self._prompt = popup([s.label for s in self._sectors])
+        self._prompt.setTarget_(self)
+        self._prompt.setAction_("promptChanged:")
+        gap()
+        rowlabel("Модель")
+        self._sec_backend = popup([BASE_MODEL_LABEL] + [lbl for lbl, _ in LLM_BACKENDS], x=190, w=160)
+        self._sec_model = field(x=358, w=124)
+        hint("«(как базовая)» = движок/модель из «Обработка речи». Иначе — свои для промпта.")
 
+        # ---- Speech (STT) tab ----
+        add_tab("Речь")
         header("🎙 Распознавание (речь → текст)")
         rowlabel("Движок")
         self._stt_backend = popup(STT_BACKENDS)
@@ -237,20 +281,10 @@ class SettingsWindow(NSObject):
         gap()
         rowlabel("Язык")
         self._lang = popup(LANGS)
-        gap()
 
-        header("⌨️ Триггер записи (колесо)")
-        rowlabel("Кнопка")
-        self._wheel_kind = popup(KINDS, x=195, w=100)
-        self._wheel_key = field(x=300, w=80)
-        cap_w = NSButton.buttonWithTitle_target_action_("Поймать", self, "captureWheel:")
-        cap_w.setFrame_(NSMakeRect(386, cur[0] - 2, 95, 24))
-        content.addSubview_(cap_w)
-        hint("вид + кнопка/клавиша, или «Поймать» → нажми нужную (комбо вроде ⌘F тоже).")
-        gap()
-
+        # ---- Voice (TTS) tab ----
+        add_tab("Голос")
         header("🔊 Голос (озвучка)")
-        # The checkbox sits ABOVE its settings and disables them when off.
         self._tts_enabled = checkbox("Озвучка включена")
         self._tts_enabled.setTarget_(self)
         self._tts_enabled.setAction_("ttsEnabledChanged:")
@@ -260,43 +294,36 @@ class SettingsWindow(NSObject):
         self._tts_voice.setTarget_(self)
         self._tts_voice.setAction_("ttsVoiceChanged:")  # play a sample on change
         gap()
-        self._prem = NSButton.buttonWithTitle_target_action_(
-            "macOS: скачать премиум-голоса…", self, "downloadPremium:"
-        )
-        self._prem.setFrame_(NSMakeRect(200, cur[0] - 2, 270, 24))
-        content.addSubview_(self._prem)
-        gap(32)
+        self._prem = btn("macOS: скачать премиум-голоса…", "downloadPremium:", 190, 290)
+        gap()
         rowlabel("Кнопка озвучки")
-        self._tts_kind = popup(KINDS, x=195, w=100)
-        self._tts_key = field(x=300, w=80)
-        cap_t = NSButton.buttonWithTitle_target_action_("Поймать", self, "captureTts:")
-        cap_t.setFrame_(NSMakeRect(386, cur[0] - 2, 95, 24))
-        content.addSubview_(cap_t)
+        self._tts_kind = popup(KINDS, x=190, w=105)
+        self._tts_key = field(x=300, w=82)
+        btn("Поймать", "captureTts:", 388, 100)
         hint("вид + кнопка/клавиша, или «Поймать» → нажми нужную.")
-        gap()
 
-        header("🎛 Модель на промпт (опц.)")
-        self._sectors = list(sectors())
-        rowlabel("Промпт")
-        self._prompt = popup([s.label for s in self._sectors])
-        self._prompt.setTarget_(self)
-        self._prompt.setAction_("promptChanged:")
+        # ---- Triggers tab ----
+        add_tab("Триггеры")
+        header("⌨️ Триггер записи (колесо)")
+        rowlabel("Кнопка")
+        self._wheel_kind = popup(KINDS, x=190, w=105)
+        self._wheel_key = field(x=300, w=82)
+        btn("Поймать", "captureWheel:", 388, 100)
+        hint("вид + кнопка/клавиша, или «Поймать» → нажми нужную (комбо вроде ⌘F тоже).")
         gap()
-        rowlabel("Модель")
-        self._sec_backend = popup([BASE_MODEL_LABEL] + [lbl for lbl, _ in LLM_BACKENDS], x=200, w=150)
-        self._sec_model = field(x=358, w=112)
-        hint("«(как базовая)» = движок/модель из блока «Обработка речи». Иначе — свои для этого промпта.")
-        gap()
-
         header("⚙️ Прочее")
         self._concurrent = checkbox("Запись во время обработки (concurrent)")
-        gap(30)
 
-        self._note = text("", 20, W - 40, 11, color=NSColor.secondaryLabelColor())
+        # ---- Save + note (always visible, below the tabs) ----
+        self._note = NSTextField.labelWithString_("")
+        self._note.setFrame_(NSMakeRect(16, 15, W - 160, 18))
+        self._note.setFont_(NSFont.systemFontOfSize_(11))
+        self._note.setTextColor_(NSColor.secondaryLabelColor())
+        root.addSubview_(self._note)
 
         save = NSButton.buttonWithTitle_target_action_("Сохранить", self, "save:")
-        save.setFrame_(NSMakeRect(W - 140, 16, 120, 30))
-        content.addSubview_(save)
+        save.setFrame_(NSMakeRect(W - 130, 12, 116, 30))
+        root.addSubview_(save)
 
         self._window = win
         self._apply_llm_visibility("ollama")  # _load re-applies with the saved value
