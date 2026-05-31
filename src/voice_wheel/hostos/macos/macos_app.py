@@ -27,7 +27,7 @@ from AppKit import (
     NSEvent,
     NSTimer,
 )
-from Foundation import NSRunLoop, NSRunLoopCommonModes, NSObject
+from Foundation import NSObject, NSRunLoop, NSRunLoopCommonModes
 from PyObjCTools import AppHelper
 
 from ...core.config import Config, app_support_dir
@@ -61,6 +61,7 @@ class VoiceWheel(NSObject):
             return None
         self._config = config
         self._lang = resolve_lang(getattr(config, "ui_language", ""))
+        self._reopen_tab = None  # tab to restore if we restarted from a settings Save
         self._concurrent = bool(getattr(config, "concurrent", False))
         self._recording = False
         self._triggers_ok = False    # green icon only once the trigger is actually live
@@ -156,6 +157,16 @@ class VoiceWheel(NSObject):
 
         if not (_project_root() / "config.json").exists():
             self.performSelector_withObject_afterDelay_("showOnboarding:", None, 1.0)
+        # If we just restarted from a settings Save, reopen settings on that tab.
+        marker = app_support_dir() / "reopen_settings"
+        if marker.exists():
+            try:
+                self._reopen_tab = marker.read_text(encoding="utf-8").strip()
+            except OSError:
+                self._reopen_tab = None
+            marker.unlink(missing_ok=True)
+            if self._reopen_tab:
+                self.performSelector_withObject_afterDelay_("reopenSettings:", None, 1.0)
 
     def heartbeat_(self, _timer):  # noqa: N802
         try:
@@ -393,6 +404,12 @@ class VoiceWheel(NSObject):
         alert.addButtonWithTitle_(_tr("onboard_open", self._lang))   # default = open settings
         alert.addButtonWithTitle_(_tr("onboard_later", self._lang))
         return alert
+
+    def reopenSettings_(self, _arg):  # noqa: N802
+        """After a settings-triggered restart, reopen the window on the same tab so
+        the user can keep configuring where they left off."""
+        self._settings_win.show()
+        self._settings_win.select_tab(self._reopen_tab)
 
     def showOnboarding_(self, _arg):  # noqa: N802
         from AppKit import (

@@ -26,26 +26,39 @@ def _window():
 
 def test_reset_on_default_tab_keeps_save_disabled():
     w = _window()
-    # Speech tab already at its dataclass defaults (auto / small / ru).
+    # The "saved" state already equals the dataclass defaults (auto / small / ru).
     w._stt_backend.selectItemWithTitle_("auto")
     w._stt_model.selectItemWithTitle_("small")
     w._lang.selectItemWithTitle_("ru")
-    w._set_dirty(False)
+    w._capture_baseline()  # this is what's saved
     w._tabs.selectTabViewItemAtIndex_(1)  # Речь
-    w.resetCurrentTab_(None)
+    w.resetCurrentTab_(None)  # reset lands back on the saved values
     assert w._dirty is False
     assert not w._save_btn.isEnabled()
 
 
 def test_reset_that_changes_a_value_arms_save():
     w = _window()
-    w._stt_model.selectItemWithTitle_("large")  # not the default
-    w._set_dirty(False)
+    w._stt_model.selectItemWithTitle_("large")  # the saved value is non-default
+    w._capture_baseline()
     w._tabs.selectTabViewItemAtIndex_(1)
-    w.resetCurrentTab_(None)
+    w.resetCurrentTab_(None)  # reset -> small, differs from the saved 'large'
     assert w._dirty is True
     assert w._save_btn.isEnabled()
     assert str(w._stt_model.titleOfSelectedItem()) == "small"
+
+
+def test_revert_a_change_disarms_save():
+    # Changing a value then changing it back to the saved value disarms Save.
+    w = _window()
+    w._stt_model.selectItemWithTitle_("small")
+    w._capture_baseline()
+    w._stt_model.selectItemWithTitle_("large")
+    w.markDirty_(None)
+    assert w._dirty is True
+    w._stt_model.selectItemWithTitle_("small")  # back to saved
+    w.markDirty_(None)
+    assert w._dirty is False  # nothing actually differs now
 
 
 def test_trigger_sig_legacy_dict_equals_one_item_list():
