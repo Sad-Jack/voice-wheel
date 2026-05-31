@@ -23,10 +23,33 @@ STR = {
     "llm_header": ("🧠 Обработка речи (LLM)", "🧠 Speech processing (LLM)"),
     "engine": ("Движок", "Engine"),
     "llm_hint": (
-        "Что превращает распознанную речь в результат под промпт сектора.",
-        "What turns recognized speech into the result for the sector's prompt.",
+        "Откуда брать ИИ, который превращает речь в результат под промпт сектора.",
+        "Where the AI that turns speech into the sector-prompt result comes from.",
     ),
-    "ollama_model": ("Модель Ollama", "Ollama model"),
+    "conn_api": ("Прямой API (облако, по ключу)", "Direct API (cloud, by key)"),
+    "conn_ollama": ("Ollama (локально, бесплатно)", "Ollama (local, free)"),
+    "conn_cc": ("Claude Code (CLI, подписка Max)", "Claude Code (CLI, Max plan)"),
+    "provider": ("Провайдер", "Provider"),
+    "api_key": ("API-ключ", "API key"),
+    "api_key_hint": (
+        "Ключ хранится в .env (в .gitignore). Anthropic: console.anthropic.com → API Keys. "
+        "OpenAI: platform.openai.com → API keys. Применяется сразу.",
+        "The key is stored in .env (gitignored). Anthropic: console.anthropic.com → API Keys. "
+        "OpenAI: platform.openai.com → API keys. Applies immediately.",
+    ),
+    "ollama_url": ("URL", "URL"),
+    "ollama_hint": (
+        "Локальная модель через Ollama — должна быть установлена и запущена (ollama serve). "
+        "URL обычно не трогаем.",
+        "A local model via Ollama — it must be installed and running (ollama serve). "
+        "The URL is usually left as-is.",
+    ),
+    "cc_hint": (
+        "Через установленный claude CLI на подписке Max (без ключа). "
+        "Установи Claude Code и выполни claude login.",
+        "Via the installed claude CLI on the Max plan (no key). "
+        "Install Claude Code and run claude login.",
+    ),
     "rules_header": ("🎛 Модель на промпт — правила (опц.)", "🎛 Per-prompt model — rules (opt.)"),
     "rules_hint": (
         "Базовая (выше) — для всех промптов. Правило задаёт свою модель отдельному.",

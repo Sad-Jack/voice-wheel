@@ -153,6 +153,18 @@ def _hotkey_bindings(raw):
     if isinstance(raw, list):
         return [b for b in raw if isinstance(b, dict)]
     return []
+
+
+# Connection type (#36): the three radio types group the underlying LLM backends.
+#   api → anthropic | openai · ollama → ollama · cc (Claude Code) → claude_warm | claude_cli
+def _conn_type_of(backend: str) -> str:
+    if backend == "ollama":
+        return "ollama"
+    if backend in ("anthropic", "openai"):
+        return "api"
+    return "cc"  # claude_warm / claude_cli
+
+
 # TTS voice picker: (backend, piper_voice, (ru label, en label)). "system" = macOS
 # voices; "piper" = local neural, auto-downloaded on save/first use. Index-mapped.
 TTS_VOICES = [
@@ -329,16 +341,55 @@ class SettingsWindow(NSObject):
         # ---- LLM tab (scrollable: base config + up to one rule per prompt) ----
         add_tab("tab_llm", scroll=True)
         header("llm_header")
-        self._backend = popup(self._backend_labels())
-        self._backend.setTarget_(self)
-        self._backend.setAction_("llmBackendChanged:")
-        row("engine", self._backend)
         hint("llm_hint")
-        # The two model rows share one slot — only the relevant one is shown.
+
+        # Connection type: three radios; only the selected type's settings show (#36).
+        self._conn_radios = []
+        for tkey, lblkey in (("api", "conn_api"), ("ollama", "conn_ollama"), ("cc", "conn_cc")):
+            rb = NSButton.radioButtonWithTitle_target_action_(T(lblkey), self, "connTypeChanged:")
+            stack[0].addArrangedSubview_(rb)
+            self._conn_radios.append((rb, tkey))
+
+        def group():
+            g = NSStackView.alloc().init()
+            g.setOrientation_(NSUserInterfaceLayoutOrientationVertical)
+            g.setAlignment_(NSLayoutAttributeLeading)
+            g.setSpacing_(6)
+            stack[0].addArrangedSubview_(g)
+            return g
+
+        # -- Direct API group: provider + key + model (#36/#38) --
+        self._grp_api = group()
+        prev, stack[0] = stack[0], self._grp_api
+        self._provider = popup(["Anthropic", "OpenAI"], w=160)
+        self._provider.setTarget_(self)
+        self._provider.setAction_("providerChanged:")
+        row("provider", self._provider)
+        self._api_key = field()
+        row("api_key", self._api_key)
+        self._api_model = field()
+        row("model", self._api_model)
+        hint("api_key_hint")
+        stack[0] = prev
+
+        # -- Ollama group: model + URL --
+        self._grp_ollama = group()
+        prev, stack[0] = stack[0], self._grp_ollama
         self._ollama = field()
-        self._ollama_row = row("ollama_model", self._ollama)
-        self._claude = field()  # shared by Claude (warm/cli/api) and OpenAI
-        self._claude_row = row("model", self._claude)
+        row("model", self._ollama)
+        self._ollama_url = field()
+        row("ollama_url", self._ollama_url)
+        hint("ollama_hint")
+        stack[0] = prev
+
+        # -- Claude Code group: model --
+        self._grp_cc = group()
+        prev, stack[0] = stack[0], self._grp_cc
+        self._cc_model = field()
+        row("model", self._cc_model)
+        hint("cc_hint")
+        stack[0] = prev
+
         header("rules_header")
         hint("rules_hint")
         self._sectors = list(sectors())
@@ -433,7 +484,8 @@ class SettingsWindow(NSObject):
         root.addSubview_(self._save_btn)
 
         self._window = win
-        self._apply_llm_visibility("ollama")  # _load re-applies with the saved value
+        self._conn_radios[1][0].setState_(1)  # default to Ollama; _load re-applies
+        self._apply_conn_visibility()
         self._wire_dirty()
         self._set_dirty(False)
 
@@ -449,8 +501,8 @@ class SettingsWindow(NSObject):
             p.setAction_("markDirty:")
         self._concurrent.setTarget_(self)
         self._concurrent.setAction_("markDirty:")
-        for f in (self._ollama, self._claude, self._wheel_kb, self._wheel_ms_key,
-                  self._tts_kb, self._tts_ms_key):
+        for f in (self._api_key, self._api_model, self._ollama, self._ollama_url, self._cc_model,
+                  self._wheel_kb, self._wheel_ms_key, self._tts_kb, self._tts_ms_key):
             f.setDelegate_(self)  # controlTextDidChange_ fires per keystroke
 
     @objc.python_method
@@ -537,10 +589,17 @@ class SettingsWindow(NSObject):
         self._uilang_popup.selectItemAtIndex_(0 if self._uilang == "ru" else 1)
         llm = data.get("llm", {})
         tts = data.get("tts", {})
-        self._select_backend(self._backend, llm.get("backend", "ollama"))
-        self._apply_llm_visibility(llm.get("backend", "ollama"))
+        backend = llm.get("backend", "ollama")
+        ctype = _conn_type_of(backend)
+        for rb, tkey in self._conn_radios:
+            rb.setState_(1 if tkey == ctype else 0)
+        self._provider.selectItemWithTitle_("OpenAI" if backend == "openai" else "Anthropic")
+        self._api_model.setStringValue_(str(llm.get("model", "claude-haiku-4-5")))
+        self._cc_model.setStringValue_(str(llm.get("model", "claude-haiku-4-5")))
         self._ollama.setStringValue_(str(llm.get("ollama_model", "qwen2.5:7b")))
-        self._claude.setStringValue_(str(llm.get("model", "claude-haiku-4-5")))
+        self._ollama_url.setStringValue_(str(llm.get("ollama_url", "http://localhost:11434")))
+        self._api_key.setStringValue_(self._read_env().get(self._provider_env_var(), ""))
+        self._apply_conn_visibility()
         stt = data.get("stt", {})
         self._stt_backend.selectItemWithTitle_(stt.get("backend", "auto"))
         self._stt_model.selectItemWithTitle_(str(stt.get("model", "small")))
@@ -570,9 +629,19 @@ class SettingsWindow(NSObject):
         data = self._read()
         data["ui_language"] = new_lang
         data.setdefault("llm", {})
-        data["llm"]["backend"] = self._backend_value(self._backend)
-        data["llm"]["ollama_model"] = str(self._ollama.stringValue())
-        data["llm"]["model"] = str(self._claude.stringValue())
+        ctype = self._selected_conn_type()
+        if ctype == "ollama":
+            data["llm"]["backend"] = "ollama"
+            data["llm"]["ollama_model"] = str(self._ollama.stringValue()).strip()
+            url = str(self._ollama_url.stringValue()).strip()
+            data["llm"]["ollama_url"] = url or "http://localhost:11434"
+        elif ctype == "api":
+            data["llm"]["backend"] = self._current_backend()  # anthropic | openai
+            data["llm"]["model"] = str(self._api_model.stringValue()).strip()
+            self._write_env_key(self._provider_env_var(), str(self._api_key.stringValue()).strip())
+        else:  # Claude Code
+            data["llm"]["backend"] = "claude_warm"
+            data["llm"]["model"] = str(self._cc_model.stringValue()).strip()
         data.setdefault("stt", {})
         data["stt"]["backend"] = str(self._stt_backend.titleOfSelectedItem())
         data["stt"]["model"] = str(self._stt_model.titleOfSelectedItem())
@@ -653,17 +722,115 @@ class SettingsWindow(NSObject):
         i = int(popup.indexOfSelectedItem())
         return LLM_BACKENDS[i][0] if 0 <= i < len(LLM_BACKENDS) else "ollama"
 
-    @objc.python_method
-    def _apply_llm_visibility(self, backend: str):
-        """Show only the model row that applies to the chosen backend. NSStackView
-        collapses a hidden arranged row, so no empty gap is left."""
-        is_ollama = backend == "ollama"
-        self._ollama_row.setHidden_(not is_ollama)
-        self._claude_row.setHidden_(is_ollama)
+    # -- connection type (#36): radios + per-type setting groups --------------
 
-    def llmBackendChanged_(self, _sender):  # noqa: N802
-        self._apply_llm_visibility(self._backend_value(self._backend))
+    @objc.python_method
+    def _selected_conn_type(self):
+        for rb, tkey in self._conn_radios:
+            if rb.state():
+                return tkey
+        return "ollama"
+
+    @objc.python_method
+    def _apply_conn_visibility(self):
+        """Show only the selected type's settings group (NSStackView collapses the
+        hidden ones, so there's no empty gap)."""
+        t = self._selected_conn_type()
+        self._grp_api.setHidden_(t != "api")
+        self._grp_ollama.setHidden_(t != "ollama")
+        self._grp_cc.setHidden_(t != "cc")
+
+    @objc.python_method
+    def _current_backend(self):
+        """The backend value implied by the current type + provider (for rule defaults)."""
+        t = self._selected_conn_type()
+        if t == "ollama":
+            return "ollama"
+        if t == "api":
+            return "openai" if str(self._provider.titleOfSelectedItem()) == "OpenAI" else "anthropic"
+        return "claude_warm"
+
+    @objc.python_method
+    def _current_model(self):
+        t = self._selected_conn_type()
+        if t == "ollama":
+            return str(self._ollama.stringValue())
+        if t == "api":
+            return str(self._api_model.stringValue())
+        return str(self._cc_model.stringValue())
+
+    def connTypeChanged_(self, sender):  # noqa: N802
+        for rb, _ in self._conn_radios:
+            rb.setState_(1 if rb == sender else 0)
+        self._apply_conn_visibility()
         self._set_dirty(True)
+
+    def providerChanged_(self, _sender):  # noqa: N802
+        # show the key stored for the just-selected provider
+        self._api_key.setStringValue_(self._read_env().get(self._provider_env_var(), ""))
+        self._set_dirty(True)
+
+    # -- API key storage in .env (#38) ----------------------------------------
+
+    @objc.python_method
+    def _provider_env_var(self):
+        return "OPENAI_API_KEY" if str(self._provider.titleOfSelectedItem()) == "OpenAI" else "ANTHROPIC_API_KEY"
+
+    @objc.python_method
+    def _env_path(self):
+        return _project_root() / ".env"
+
+    @objc.python_method
+    def _read_env(self) -> dict:
+        out: dict = {}
+        try:
+            for line in self._env_path().read_text(encoding="utf-8").splitlines():
+                s = line.strip()
+                if not s or s.startswith("#") or "=" not in s:
+                    continue
+                k, v = s.split("=", 1)
+                out[k.strip()] = v.strip().strip("\"'")
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            log.warning("could not read .env: %s", exc)
+        return out
+
+    @objc.python_method
+    def _write_env_key(self, var: str, value: str) -> None:
+        """Update/append ``var=value`` in .env (preserving other lines), and reflect
+        it in this process's env so the live-applied LLM client picks it up at once.
+        An empty value removes the line / unsets it."""
+        import os
+
+        path = self._env_path()
+        lines = []
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            log.warning("could not read .env for write: %s", exc)
+        out, found = [], False
+        for line in lines:
+            s = line.strip()
+            if s and not s.startswith("#") and "=" in s and s.split("=", 1)[0].strip() == var:
+                found = True
+                if value:
+                    out.append(f"{var}={value}")  # else drop the line
+            else:
+                out.append(line)
+        if value and not found:
+            out.append(f"{var}={value}")
+        try:
+            path.write_text("\n".join(out) + ("\n" if out else ""), encoding="utf-8")
+        except OSError as exc:
+            log.warning("could not write .env: %s", exc)
+            return
+        if value:
+            os.environ[var] = value
+        else:
+            os.environ.pop(var, None)
 
     # -- per-tab reset to defaults (#51) -------------------------------------
     # «Сброс» (bottom bar) resets the *active* tab's controls to the config
@@ -696,8 +863,9 @@ class SettingsWindow(NSObject):
                  str(r["model"].stringValue()))
                 for r in self._rules
             )
-            return (self._backend_value(self._backend), str(self._ollama.stringValue()),
-                    str(self._claude.stringValue()), rules)
+            return (self._selected_conn_type(), str(self._provider.titleOfSelectedItem()),
+                    str(self._api_model.stringValue()), str(self._ollama.stringValue()),
+                    str(self._ollama_url.stringValue()), str(self._cc_model.stringValue()), rules)
         if ident == "tab_stt":
             return (str(self._stt_backend.titleOfSelectedItem()),
                     str(self._stt_model.titleOfSelectedItem()),
@@ -716,11 +884,15 @@ class SettingsWindow(NSObject):
     def resetLlm_(self, _sender):  # noqa: N802
         from ...core.config import LLMConfig
 
-        d = LLMConfig()
-        self._select_backend(self._backend, d.backend)
-        self._apply_llm_visibility(d.backend)
+        d = LLMConfig()  # default backend = ollama
+        for rb, tkey in self._conn_radios:
+            rb.setState_(1 if tkey == _conn_type_of(d.backend) else 0)
+        self._provider.selectItemWithTitle_("Anthropic")
+        self._api_model.setStringValue_(d.model)
+        self._cc_model.setStringValue_(d.model)
         self._ollama.setStringValue_(d.ollama_model)
-        self._claude.setStringValue_(d.model)
+        self._ollama_url.setStringValue_(d.ollama_url)
+        self._apply_conn_visibility()
         for r in list(self._rules):  # drop every per-prompt rule
             self._rules_stack.removeView_(r["row"])
         self._rules = []
@@ -814,9 +986,8 @@ class SettingsWindow(NSObject):
         key = self._first_unassigned()
         if key is None:
             return
-        backend = self._backend_value(self._backend)
-        model = str(self._ollama.stringValue()) if backend == "ollama" else str(self._claude.stringValue())
-        self._make_rule_row(key, backend, model)  # default to the base config
+        # default a new rule to the base connection's backend + model
+        self._make_rule_row(key, self._current_backend(), self._current_model())
         self._refresh_add_button()
         self._set_dirty(True)
 

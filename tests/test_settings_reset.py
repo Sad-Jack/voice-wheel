@@ -15,7 +15,7 @@ from AppKit import NSApplication  # noqa: E402
 
 NSApplication.sharedApplication()
 
-from voice_wheel.hostos.macos.settings import SettingsWindow  # noqa: E402
+from voice_wheel.hostos.macos.settings import SettingsWindow, _conn_type_of  # noqa: E402
 
 
 def _window():
@@ -64,3 +64,27 @@ def test_trigger_sig_legacy_dict_equals_one_item_list():
         {"kind": "mouse_side", "key": "4"}
     )
     assert w._trigger_sig(None) == frozenset()
+
+
+def test_conn_type_maps_backends_to_radio_groups():
+    # The three radio types (#36) group the underlying LLM backends.
+    assert _conn_type_of("ollama") == "ollama"
+    assert _conn_type_of("anthropic") == "api"
+    assert _conn_type_of("openai") == "api"
+    assert _conn_type_of("claude_warm") == "cc"
+    assert _conn_type_of("claude_cli") == "cc"
+
+
+def test_connection_visibility_shows_only_selected_group():
+    w = _window()
+    for rb, t in w._conn_radios:
+        rb.setState_(1 if t == "api" else 0)
+    w._apply_conn_visibility()
+    assert not w._grp_api.isHidden()
+    assert w._grp_ollama.isHidden() and w._grp_cc.isHidden()
+
+    for rb, t in w._conn_radios:
+        rb.setState_(1 if t == "cc" else 0)
+    w._apply_conn_visibility()
+    assert not w._grp_cc.isHidden()
+    assert w._grp_api.isHidden() and w._grp_ollama.isHidden()
