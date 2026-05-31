@@ -63,8 +63,6 @@ class _FlippedView(NSView):
         return True
 
 
-BASE_MODEL_LABEL = "(как базовая)"  # per-prompt override = "no override, use the default LLM"
-
 # macOS keyCodes -> pynput-compatible names for keys that aren't plain characters.
 _KEYCODE_NAMES = {
     122: "f1", 120: "f2", 99: "f3", 118: "f4", 96: "f5", 97: "f6",
@@ -148,8 +146,7 @@ class SettingsWindow(NSObject):
         if self is not None:
             self._window = None
             self._preview_speaker = None  # plays a sample when the voice changes
-            self._sector_overrides = {}   # sector_key -> {backend, model}; per-prompt model
-            self._editing_sector = None   # which prompt's override is currently in the fields
+            self._rules = []              # per-prompt model rules (rows): each = dict of controls
             self._apply_cb = None         # controller hook to apply cheap settings live
             self._capture_monitor = None  # active NSEvent monitor while catching a key
         return self
@@ -268,16 +265,16 @@ class SettingsWindow(NSObject):
         self._ollama_row = row("Модель Ollama", self._ollama)
         self._claude = field()
         self._claude_row = row("Модель Claude", self._claude)
-        header("🎛 Модель на промпт (опц.)")
+        header("🎛 Модель на промпт — правила (опц.)")
+        hint("Базовая (выше) — для всех промптов. Правило задаёт свою модель отдельному.")
         self._sectors = list(sectors())
-        self._prompt = popup([s.label for s in self._sectors])
-        self._prompt.setTarget_(self)
-        self._prompt.setAction_("promptChanged:")
-        row("Промпт", self._prompt)
-        self._sec_backend = popup([BASE_MODEL_LABEL] + [lbl for lbl, _ in LLM_BACKENDS], w=170)
-        self._sec_model = field(w=120)
-        row("Модель", self._sec_backend, self._sec_model)
-        hint("«(как базовая)» = движок/модель из «Обработка речи». Иначе — свои для промпта.")
+        self._rules_stack = NSStackView.alloc().init()
+        self._rules_stack.setOrientation_(NSUserInterfaceLayoutOrientationVertical)
+        self._rules_stack.setAlignment_(NSLayoutAttributeLeading)
+        self._rules_stack.setSpacing_(6)
+        stack[0].addArrangedSubview_(self._rules_stack)
+        self._add_rule_btn = button("+ Добавить правило", "addRule:", 180)
+        stack[0].addArrangedSubview_(self._add_rule_btn)
 
         # ---- Speech (STT) tab ----
         add_tab("Речь")
@@ -377,14 +374,13 @@ class SettingsWindow(NSObject):
         self._tts_enabled.setState_(1 if tts.get("enabled", True) else 0)
         self._apply_tts_enabled()
         self._concurrent.setState_(1 if data.get("concurrent", False) else 0)
-        self._sector_overrides = {
-            k: v for k, v in (data.get("sector_models") or {}).items()
-            if isinstance(v, dict)  # skip the "_comment" string
-        }
-        self._editing_sector = None
-        if self._sectors:
-            self._prompt.selectItemAtIndex_(0)
-        self._load_selected_override()
+        for r in list(self._rules):   # clear any existing rule rows
+            self._rules_stack.removeView_(r["row"])
+        self._rules = []
+        for key, ov in (data.get("sector_models") or {}).items():
+            if isinstance(ov, dict):  # skip the "_comment" string
+                self._make_rule_row(key, ov.get("backend", "ollama"), ov.get("model", ""))
+        self._refresh_add_button()
         self._note.setStringValue_("")
 
     def save_(self, _sender):  # noqa: N802
@@ -412,10 +408,16 @@ class SettingsWindow(NSObject):
         if backend == "piper":
             data["tts"]["piper_voice"] = piper_voice
         data["concurrent"] = bool(self._concurrent.state())
-        # per-prompt model overrides (capture the prompt currently shown first)
-        self._save_current_override()
+        # per-prompt model rules -> sector_models
+        sm = {}
+        for r in self._rules:
+            key = self._rule_sector_key(r)
+            if key:
+                sm[key] = {
+                    "backend": self._llm_value(str(r["engine"].titleOfSelectedItem())),
+                    "model": str(r["model"].stringValue()).strip(),
+                }
         existing = data.get("sector_models")
-        sm = dict(self._sector_overrides)
         if isinstance(existing, dict) and "_comment" in existing:
             sm["_comment"] = existing["_comment"]
         data["sector_models"] = sm
@@ -471,43 +473,67 @@ class SettingsWindow(NSObject):
     def llmBackendChanged_(self, _sender):  # noqa: N802
         self._apply_llm_visibility(self._llm_value(str(self._backend.titleOfSelectedItem())))
 
-    # -- per-prompt model override -------------------------------------------
+    # -- per-prompt model rules ----------------------------------------------
 
     @objc.python_method
-    def _sector_key_for_label(self, label: str):
+    def _rule_sector_key(self, rule):
+        label = str(rule["prompt"].titleOfSelectedItem())
         return next((s.key for s in self._sectors if s.label == label), None)
 
     @objc.python_method
-    def _save_current_override(self):
-        """Persist the fields into the in-memory map for the prompt being edited."""
-        key = self._editing_sector
-        if not key:
-            return
-        backend_label = str(self._sec_backend.titleOfSelectedItem())
-        if backend_label == BASE_MODEL_LABEL:
-            self._sector_overrides.pop(key, None)  # no override -> use the default LLM
-        else:
-            self._sector_overrides[key] = {
-                "backend": self._llm_value(backend_label),
-                "model": str(self._sec_model.stringValue()).strip(),
-            }
+    def _first_unassigned(self):
+        assigned = {self._rule_sector_key(r) for r in self._rules}
+        return next((s.key for s in self._sectors if s.key not in assigned), None)
 
     @objc.python_method
-    def _load_selected_override(self):
-        """Load the selected prompt's override (or 'base') into the fields."""
-        key = self._sector_key_for_label(str(self._prompt.titleOfSelectedItem()))
-        self._editing_sector = key
-        override = self._sector_overrides.get(key) if key else None
-        if override:
-            self._sec_backend.selectItemWithTitle_(self._llm_label(override.get("backend", "ollama")))
-            self._sec_model.setStringValue_(str(override.get("model", "")))
-        else:
-            self._sec_backend.selectItemWithTitle_(BASE_MODEL_LABEL)
-            self._sec_model.setStringValue_("")
+    def _refresh_add_button(self):
+        self._add_rule_btn.setEnabled_(self._first_unassigned() is not None)
 
-    def promptChanged_(self, _sender):  # noqa: N802
-        self._save_current_override()    # keep edits for the prompt we're leaving
-        self._load_selected_override()   # show the newly-selected prompt's override
+    @objc.python_method
+    def _make_rule_row(self, sector_key, backend, model):
+        """Build one rule row — [промпт ▾] [движок ▾] [модель] [✕] — and track it."""
+        h = NSStackView.alloc().init()
+        h.setOrientation_(NSUserInterfaceLayoutOrientationHorizontal)
+        h.setAlignment_(NSLayoutAttributeCenterY)
+        h.setSpacing_(6)
+        prompt = NSPopUpButton.alloc().initWithFrame_pullsDown_(NSMakeRect(0, 0, 130, 26), False)
+        prompt.addItemsWithTitles_([s.label for s in self._sectors])
+        prompt.widthAnchor().constraintEqualToConstant_(130).setActive_(True)
+        lbl = next((s.label for s in self._sectors if s.key == sector_key), None)
+        if lbl:
+            prompt.selectItemWithTitle_(lbl)
+        engine = NSPopUpButton.alloc().initWithFrame_pullsDown_(NSMakeRect(0, 0, 150, 26), False)
+        engine.addItemsWithTitles_([lab for lab, _ in LLM_BACKENDS])
+        engine.widthAnchor().constraintEqualToConstant_(150).setActive_(True)
+        engine.selectItemWithTitle_(self._llm_label(backend))
+        model_field = NSTextField.alloc().initWithFrame_(NSMakeRect(0, 0, 110, 22))
+        model_field.widthAnchor().constraintEqualToConstant_(110).setActive_(True)
+        model_field.setStringValue_(str(model or ""))
+        delete = NSButton.buttonWithTitle_target_action_("✕", self, "deleteRule:")
+        delete.widthAnchor().constraintEqualToConstant_(32).setActive_(True)
+        for c in (prompt, engine, model_field, delete):
+            h.addArrangedSubview_(c)
+        self._rules.append(
+            {"row": h, "prompt": prompt, "engine": engine, "model": model_field, "delete": delete}
+        )
+        self._rules_stack.addArrangedSubview_(h)
+
+    def addRule_(self, _sender):  # noqa: N802
+        key = self._first_unassigned()
+        if key is None:
+            return
+        backend = self._llm_value(str(self._backend.titleOfSelectedItem()))
+        model = str(self._ollama.stringValue()) if backend == "ollama" else str(self._claude.stringValue())
+        self._make_rule_row(key, backend, model)  # default to the base config
+        self._refresh_add_button()
+
+    def deleteRule_(self, sender):  # noqa: N802
+        rule = next((r for r in self._rules if r["delete"] == sender), None)
+        if rule is None:
+            return
+        self._rules_stack.removeView_(rule["row"])
+        self._rules.remove(rule)
+        self._refresh_add_button()
 
     @objc.python_method
     def _apply_tts_enabled(self):
