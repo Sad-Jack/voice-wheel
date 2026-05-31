@@ -31,6 +31,11 @@ STR = {
     "conn_cc": ("Claude Code (CLI, подписка Max)", "Claude Code (CLI, Max plan)"),
     "provider": ("Провайдер", "Provider"),
     "api_key": ("API-ключ", "API key"),
+    "show_key": ("Показать", "Show"),
+    "note_api_no_key": (
+        "⚠️ Ключ не задан — облачный LLM работать не будет. Добавь ключ.",
+        "⚠️ No key set — the cloud LLM won't work. Add a key.",
+    ),
     "api_key_hint": (
         "Ключ хранится в .env (в .gitignore). Anthropic: console.anthropic.com → API Keys. "
         "OpenAI: platform.openai.com → API keys. Применяется сразу.",

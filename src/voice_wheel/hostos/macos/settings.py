@@ -50,6 +50,7 @@ from AppKit import (
     NSLineBreakByWordWrapping,
     NSPopUpButton,
     NSScrollView,
+    NSSecureTextField,
     NSStackView,
     NSTabView,
     NSTabViewItem,
@@ -217,6 +218,8 @@ class SettingsWindow(NSObject):
             self._save_btn = None
             self._tabs = None
             self._baseline = None         # form snapshot at load -> Save = (form != baseline)
+            self._last_provider = "Anthropic"   # for per-provider model memory (#F2)
+            self._model_by_provider = {}
             self._pull_result = None      # (ok, model) handoff from the ollama-pull thread
         return self
 
@@ -419,8 +422,15 @@ class SettingsWindow(NSObject):
         self._provider.setTarget_(self)
         self._provider.setAction_("providerChanged:")
         row("provider", self._provider)
-        self._api_key = field()
-        row("api_key", self._api_key)
+        # masked key (#F4) + a plain mirror toggled by «Показать»
+        self._api_key = NSSecureTextField.alloc().initWithFrame_(NSMakeRect(0, 0, 200, 22))
+        self._api_key.widthAnchor().constraintEqualToConstant_(200).setActive_(True)
+        self._api_key_plain = field(w=200)
+        self._api_key_plain.setHidden_(True)
+        self._api_show = NSButton.checkboxWithTitle_target_action_(
+            T("show_key"), self, "toggleKeyVisibility:"
+        )
+        row("api_key", self._api_key, self._api_key_plain, self._api_show)
         self._api_model = combo(ANTHROPIC_MODELS)  # provider switch updates the list
         row("model", self._api_model)
         hint("api_key_hint")
@@ -566,6 +576,7 @@ class SettingsWindow(NSObject):
                               "cc": "tip_conn_cc"}[tkey]))
         pairs = (
             (self._provider, "tip_provider"), (self._api_key, "tip_api_key"),
+            (self._api_key_plain, "tip_api_key"),
             (self._api_model, "tip_model"), (self._ollama, "tip_model"),
             (self._ollama_url, "tip_ollama_url"), (self._dl_ollama, "tip_download"),
             (self._cc_model, "tip_model"), (self._stt_backend, "tip_stt_backend"),
@@ -595,8 +606,8 @@ class SettingsWindow(NSObject):
             p.setAction_("markDirty:")
         self._concurrent.setTarget_(self)
         self._concurrent.setAction_("markDirty:")
-        for f in (self._api_key, self._api_model, self._ollama, self._ollama_url, self._cc_model,
-                  self._wheel_kb, self._tts_kb):
+        for f in (self._api_key, self._api_key_plain, self._api_model, self._ollama,
+                  self._ollama_url, self._cc_model, self._wheel_kb, self._tts_kb):
             f.setDelegate_(self)  # controlTextDidChange_ fires per keystroke
 
     @objc.python_method
@@ -750,11 +761,20 @@ class SettingsWindow(NSObject):
             rb.setState_(1 if tkey == ctype else 0)
         self._provider.selectItemWithTitle_("OpenAI" if backend == "openai" else "Anthropic")
         self._refresh_api_models()
-        self._api_model.setStringValue_(str(llm.get("model", "claude-haiku-4-5")))
-        self._cc_model.setStringValue_(str(llm.get("model", "claude-haiku-4-5")))
+        model = str(llm.get("model", "claude-haiku-4-5"))
+        self._api_model.setStringValue_(model)
+        self._cc_model.setStringValue_(model)
+        # per-provider model memory (#F2): the loaded provider keeps its model, the
+        # other starts at its own default.
+        self._last_provider = str(self._provider.titleOfSelectedItem())
+        self._model_by_provider = {"Anthropic": ANTHROPIC_MODELS[0], "OpenAI": OPENAI_MODELS[0]}
+        self._model_by_provider[self._last_provider] = model
         self._ollama.setStringValue_(str(llm.get("ollama_model", "qwen2.5:7b")))
         self._ollama_url.setStringValue_(str(llm.get("ollama_url", "http://localhost:11434")))
-        self._api_key.setStringValue_(self._read_env().get(self._provider_env_var(), ""))
+        self._set_api_key(self._read_env().get(self._provider_env_var(), ""))
+        self._api_show.setState_(0)
+        self._api_key.setHidden_(False)
+        self._api_key_plain.setHidden_(True)
         self._apply_conn_visibility()
         if ctype == "ollama":
             self._start_ollama_check()
@@ -796,7 +816,7 @@ class SettingsWindow(NSObject):
         elif ctype == "api":
             data["llm"]["backend"] = self._current_backend()  # anthropic | openai
             data["llm"]["model"] = str(self._api_model.stringValue()).strip()
-            self._write_env_key(self._provider_env_var(), str(self._api_key.stringValue()).strip())
+            self._write_env_key(self._provider_env_var(), self._api_key_value().strip())
         else:  # Claude Code
             data["llm"]["backend"] = "claude_warm"
             data["llm"]["model"] = str(self._cc_model.stringValue()).strip()
@@ -869,8 +889,12 @@ class SettingsWindow(NSObject):
                 self._apply_cb()
             except Exception as exc:  # noqa: BLE001 - never let live-apply break Save
                 log.warning("live-apply failed: %s", exc)
-        self._note.setStringValue_("")
         self._capture_baseline()  # the just-saved form is the new baseline
+        # Warn (don't block) if the cloud LLM was chosen but no key is set (#F5).
+        if ctype == "api" and not self._api_key_value().strip():
+            self._note.setStringValue_(self._t("note_api_no_key"))
+        else:
+            self._note.setStringValue_("")
         if backend == "piper":
             self._maybe_download_piper(piper_voice)
 
@@ -946,10 +970,39 @@ class SettingsWindow(NSObject):
         self._api_model.addItemsWithObjectValues_(self._provider_models())
 
     def providerChanged_(self, _sender):  # noqa: N802
+        # Remember the model per provider so switching back restores it (#F2),
+        # instead of silently clobbering a typed/custom model.
+        self._model_by_provider[self._last_provider] = str(self._api_model.stringValue())
+        new_provider = str(self._provider.titleOfSelectedItem())
+        self._last_provider = new_provider
         self._refresh_api_models()
-        self._api_model.setStringValue_(self._provider_models()[0])  # provider changed -> its default
-        self._api_key.setStringValue_(self._read_env().get(self._provider_env_var(), ""))
+        self._api_model.setStringValue_(
+            self._model_by_provider.get(new_provider) or self._provider_models()[0]
+        )
+        self._set_api_key(self._read_env().get(self._provider_env_var(), ""))
         self._recompute_dirty()
+
+    # -- API key field: masked + «Показать» reveal (#F4) ----------------------
+
+    @objc.python_method
+    def _api_key_value(self):
+        f = self._api_key_plain if not self._api_key_plain.isHidden() else self._api_key
+        return str(f.stringValue())
+
+    @objc.python_method
+    def _set_api_key(self, value):
+        self._api_key.setStringValue_(value)
+        self._api_key_plain.setStringValue_(value)
+
+    def toggleKeyVisibility_(self, sender):  # noqa: N802
+        if bool(sender.state()):  # reveal: copy into the plain field and show it
+            self._api_key_plain.setStringValue_(str(self._api_key.stringValue()))
+            self._api_key.setHidden_(True)
+            self._api_key_plain.setHidden_(False)
+        else:  # re-mask
+            self._api_key.setStringValue_(str(self._api_key_plain.stringValue()))
+            self._api_key_plain.setHidden_(True)
+            self._api_key.setHidden_(False)
 
     # -- Ollama model download (#39) ------------------------------------------
 
@@ -1159,7 +1212,7 @@ class SettingsWindow(NSObject):
                 for r in self._rules
             )
             return (self._selected_conn_type(), str(self._provider.titleOfSelectedItem()),
-                    str(self._api_key.stringValue()), str(self._api_model.stringValue()),
+                    self._api_key_value(), str(self._api_model.stringValue()),
                     str(self._ollama.stringValue()), str(self._ollama_url.stringValue()),
                     str(self._cc_model.stringValue()), rules)
         if ident == "tab_stt":
