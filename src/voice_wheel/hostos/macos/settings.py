@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 
 import objc
 from AppKit import (
@@ -36,8 +37,17 @@ BACKENDS = ["ollama", "claude_warm", "anthropic", "claude_cli"]
 STT_BACKENDS = ["auto", "mlx", "faster-whisper"]
 LANGS = ["ru", "en", "auto"]
 KINDS = ["mouse_side", "keyboard", "mouse"]
+# TTS voice picker: (label, backend, piper_voice). "system" = macOS voices (auto-picks
+# the best installed quality); "piper" = local neural, auto-downloaded on save/first use.
+TTS_VOICES = [
+    ("macOS (системный голос)", "system", ""),
+    ("Piper: Irina — нейро (RU, жен.)", "piper", "ru_RU-irina-medium"),
+    ("Piper: Денис — нейро (RU, муж.)", "piper", "ru_RU-denis-medium"),
+    ("Piper: Руслан — нейро (RU, муж.)", "piper", "ru_RU-ruslan-medium"),
+    ("Piper: Дмитрий — нейро (RU, муж.)", "piper", "ru_RU-dmitri-medium"),
+]
 W = 480
-H = 600
+H = 700
 
 
 class SettingsWindow(NSObject):
@@ -116,7 +126,16 @@ class SettingsWindow(NSObject):
         label("Триггер озвучки", y)
         self._tts_kind = popup(KINDS, y, x=180, w=140)
         self._tts_key = field(y, x=330, w=120)
-        y -= 42
+        y -= 38
+        label("Голос (TTS)", y)
+        self._tts_voice = popup([v[0] for v in TTS_VOICES], y)
+        y -= 34
+        prem = NSButton.buttonWithTitle_target_action_(
+            "macOS: скачать премиум-голоса…", self, "downloadPremium:"
+        )
+        prem.setFrame_(NSMakeRect(180, y - 2, 270, 24))
+        content.addSubview_(prem)
+        y -= 38
         self._tts_enabled = checkbox("Озвучка включена", y); y -= 30
         self._concurrent = checkbox("Запись во время обработки", y); y -= 40
 
@@ -163,6 +182,7 @@ class SettingsWindow(NSObject):
         self._wheel_key.setStringValue_(str(hk.get("key", "3")))
         self._tts_kind.selectItemWithTitle_(tts_hk.get("kind", "mouse_side"))
         self._tts_key.setStringValue_(str(tts_hk.get("key", "4")))
+        self._tts_voice.selectItemWithTitle_(self._voice_label(tts))
         self._tts_enabled.setState_(1 if tts.get("enabled", True) else 0)
         self._concurrent.setState_(1 if data.get("concurrent", False) else 0)
         self._note.setStringValue_("")
@@ -187,6 +207,10 @@ class SettingsWindow(NSObject):
             "kind": str(self._tts_kind.titleOfSelectedItem()),
             "key": str(self._tts_key.stringValue()),
         }
+        backend, piper_voice = self._selected_voice()
+        data["tts"]["backend"] = backend
+        if backend == "piper":
+            data["tts"]["piper_voice"] = piper_voice
         data["concurrent"] = bool(self._concurrent.state())
         try:
             self._path().write_text(
@@ -197,6 +221,67 @@ class SettingsWindow(NSObject):
             self._note.setStringValue_(f"⚠️ Не удалось сохранить: {exc}")
             return
         self._note.setStringValue_("Сохранено. Перезапусти приложение (меню-бар → Выход, затем ./run.sh).")
+        if backend == "piper":
+            self._maybe_download_piper(piper_voice)
+
+    # -- TTS voice helpers ----------------------------------------------------
+
+    @objc.python_method
+    def _voice_label(self, tts: dict) -> str:
+        """Map the saved config back to a dropdown label."""
+        backend = tts.get("backend", "system")
+        piper_voice = tts.get("piper_voice", "ru_RU-irina-medium")
+        for label, b, pv in TTS_VOICES:
+            if b == backend and (b != "piper" or pv == piper_voice):
+                return label
+        return TTS_VOICES[0][0]
+
+    @objc.python_method
+    def _selected_voice(self):
+        """Map the dropdown selection to (backend, piper_voice)."""
+        sel = str(self._tts_voice.titleOfSelectedItem())
+        for label, backend, piper_voice in TTS_VOICES:
+            if label == sel:
+                return backend, piper_voice
+        return "system", ""
+
+    @objc.python_method
+    def _maybe_download_piper(self, voice_name: str) -> None:
+        """Fetch the Piper voice now (in the background) if it isn't cached yet."""
+        if not voice_name:
+            return
+        from ...core.config import app_support_dir
+
+        cache = app_support_dir() / "piper"
+        if (cache / f"{voice_name}.onnx").exists():
+            return
+        self._note.setStringValue_(f"Скачиваю голос «{voice_name}»… применится после перезапуска.")
+
+        def _dl():
+            try:
+                from piper.download_voices import download_voice
+
+                cache.mkdir(parents=True, exist_ok=True)
+                download_voice(voice_name, cache)
+                log.info("piper voice %s downloaded", voice_name)
+            except Exception as exc:  # noqa: BLE001
+                log.warning("piper voice download failed: %s", exc)
+
+        threading.Thread(target=_dl, daemon=True).start()
+
+    def downloadPremium_(self, _sender):  # noqa: N802
+        """Open the macOS Spoken Content pane so the user can download a premium voice."""
+        from AppKit import NSWorkspace
+        from Foundation import NSURL
+
+        url = NSURL.URLWithString_(
+            "x-apple.systempreferences:com.apple.preference.universalaccess?SpokenContent"
+        )
+        NSWorkspace.sharedWorkspace().openURL_(url)
+        self._note.setStringValue_(
+            "Открыл «Озвучивание»: скачай русский голос (Enhanced/Premium), затем выбери "
+            "«macOS» в списке голосов. Применится после перезапуска."
+        )
 
     def windowWillClose_(self, _notif):  # noqa: N802
         NSApplication.sharedApplication().setActivationPolicy_(

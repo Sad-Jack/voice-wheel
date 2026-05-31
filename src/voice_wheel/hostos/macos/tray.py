@@ -1,8 +1,14 @@
 """Menu-bar status item (NSStatusItem).
 
-Mic icon + live status, a History submenu (last results — click to re-copy),
-"restore previous clipboard", and Quit. The controller wires handlers via
-``set_handlers`` and refreshes the list via ``update_history``.
+A mic icon tinted green (ready) / red (not ready), a History submenu (last
+results — click to re-copy), Settings, and Quit. The controller wires the
+re-copy + settings handlers via ``set_handlers``, refreshes the list via
+``update_history``, and reflects readiness via ``set_ready``.
+
+Readiness is shown by icon color instead of a text line: if the app is running
+it's "ready" by definition, so a "ready" label carried no information — a green
+(ok) / red (warming up or no Accessibility) tint says it at a glance, always
+visible without opening the menu.
 """
 
 from __future__ import annotations
@@ -10,6 +16,7 @@ from __future__ import annotations
 import objc
 from AppKit import (
     NSApplication,
+    NSColor,
     NSImage,
     NSMenu,
     NSMenuItem,
@@ -30,30 +37,23 @@ class MenuBar(NSObject):
         if self is None:
             return None
         self._reuse = None
-        self._restore = None
         self._settings = None
 
         self._status_item = NSStatusBar.systemStatusBar().statusItemWithLength_(
             NSVariableStatusItemLength
         )
-        button = self._status_item.button()
+        self._button = self._status_item.button()
         img = NSImage.imageWithSystemSymbolName_accessibilityDescription_(
             "mic.circle.fill", "Voice Wheel"
         )
         if img is not None:
             img.setTemplate_(True)
-            button.setImage_(img)
+            self._button.setImage_(img)
         else:
-            button.setTitle_("VW")
+            self._button.setTitle_("VW")
+        self._button.setContentTintColor_(NSColor.systemRedColor())  # red until ready
 
         menu = NSMenu.alloc().init()
-        self._status_mi = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-            "Voice Wheel", None, ""
-        )
-        self._status_mi.setEnabled_(False)
-        menu.addItem_(self._status_mi)
-        menu.addItem_(NSMenuItem.separatorItem())
-
         self._history_mi = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
             "История", None, ""
         )
@@ -61,13 +61,6 @@ class MenuBar(NSObject):
         self._history_mi.setSubmenu_(self._history_menu)
         menu.addItem_(self._history_mi)
         self._refresh_history_menu([])
-
-        self._restore_mi = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-            "Вернуть прошлый буфер", "restoreClicked:", ""
-        )
-        self._restore_mi.setTarget_(self)
-        self._restore_mi.setEnabled_(False)
-        menu.addItem_(self._restore_mi)
 
         settings_mi = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
             "Настройки…", "settingsClicked:", ","
@@ -89,17 +82,15 @@ class MenuBar(NSObject):
     # -- wiring ---------------------------------------------------------------
 
     @objc.python_method
-    def set_handlers(self, reuse, restore, settings=None):
+    def set_handlers(self, reuse, settings=None):
         self._reuse = reuse
-        self._restore = restore
         self._settings = settings
 
-    def setStatus_(self, text):  # noqa: N802
-        self._status_mi.setTitle_(text)
-
     @objc.python_method
-    def set_restore_enabled(self, enabled: bool):
-        self._restore_mi.setEnabled_(bool(enabled))
+    def set_ready(self, ready: bool):
+        """Tint the menu-bar icon: green = ready, red = not ready."""
+        color = NSColor.systemGreenColor() if ready else NSColor.systemRedColor()
+        self._button.setContentTintColor_(color)
 
     @objc.python_method
     def update_history(self, entries):
@@ -127,10 +118,6 @@ class MenuBar(NSObject):
         text = sender.representedObject()
         if self._reuse is not None and text is not None:
             self._reuse(str(text))
-
-    def restoreClicked_(self, _sender):  # noqa: N802
-        if self._restore is not None:
-            self._restore()
 
     def settingsClicked_(self, _sender):  # noqa: N802
         if self._settings is not None:
