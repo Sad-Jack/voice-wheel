@@ -1,135 +1,152 @@
 # Voice Wheel / AI Voice Clipboard
 
-A macOS-wide **voice clipboard**. Hold a side mouse button, speak, pick a mode on the radial wheel around your cursor, release — and a finished, paste-ready result is in your clipboard for `Cmd+V` into any app.
+A macOS-wide **voice clipboard**. Hold a side mouse button, speak, pick a mode on
+the radial wheel around your cursor, release — and a finished, paste-ready result
+is in your clipboard for `⌘V` into any app.
 
-> The value is not speech-to-text. It's `intent + style → ready-to-paste result`.
+> The value isn't speech-to-text. It's **`intent + style → ready-to-paste result`.**
+
+A pure-PyObjC menu-bar agent (no Dock icon). The overlay never steals focus, so
+the result pastes into whatever app you were in. Runs fully local and free by
+default (Ollama for the LLM, Whisper for speech, Piper for voice) — no API key
+required.
+
+---
 
 ## How it works
 
-Hold the trigger → a wheel appears at the cursor and recording starts → move the mouse to aim → release:
+Hold the trigger → a neon wheel appears at the cursor and recording starts → move
+the mouse to aim → release:
 
 - **Center** → plain dictation (speech → text, no LLM).
-- **Sector** → the transcript is processed by that sector's prompt, then put in the clipboard. Default sectors: **Нормализация** (up) · **Деловой** (right) · **Кратко** (down) · **Дружелюбно** (left).
+- **Inner ring (a sector)** → the transcript is processed by that sector's prompt.
+- **Outer ring (a sector)** → your clipboard is used as **context** + your spoken
+  instruction → that sector's prompt → result.
+- **Cursor outside the wheel** → **✕ cancel**, nothing happens.
 
-A pulse flashes at the cursor when the result is ready.
+Default sectors (by direction): **Нормализация** (up) · **Деловой** (right) ·
+**Кратко** (down) · **Дружелюбно** (left). A colored pulse flashes at the cursor
+when done: 🟢 ok · 🟠 raw text saved (LLM unavailable) · 🔴 failed.
 
-## Requirements
+**Read aloud:** press the TTS button (default side button **#4**) to speak the
+**selected** text in any app (or the clipboard if nothing is selected) — a local
+neural voice, offline. Press again to stop.
 
-- **macOS** on Apple Silicon (developed against 15.7.3).
-- **Python 3.11 or 3.12** (mlx-whisper / faster-whisper may lack 3.14 wheels).
-- An LLM backend (default is local **Ollama** — free, no key). See [LLM backends](#llm-backends).
+---
 
-## Setup
+## Quick start
+
+Full, step-by-step instructions (incl. permissions and what auto-downloads) are
+in **[SETUP.md](SETUP.md)**. The short version:
 
 ```bash
-python3.12 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-cp config.example.json config.json        # optional: tweak settings
+python3.12 -m venv ~/.venvs/voice-wheel-312
+~/.venvs/voice-wheel-312/bin/pip install -r requirements.txt
 
-# default LLM backend — local, free:
 brew install ollama && brew services start ollama
 ollama pull qwen2.5:7b
-```
 
-## macOS permissions (the app is silent without them)
-
-Grant these to **the binary that launches Python** (your terminal during dev):
-
-| Permission | Why |
-|---|---|
-| **Microphone** | record your voice |
-| **Accessibility** | global mouse/key capture via the event tap |
-| **Input Monitoring** | detect the trigger button |
-
-System Settings → Privacy & Security → (each pane). The app pops the Accessibility prompt on first run.
-
-## Run
-
-Quick way (finds the venv, starts Ollama if needed, runs one fresh instance):
-
-```bash
 ./run.sh
 ```
 
-Or manually:
+Grant **Microphone**, **Accessibility**, and **Input Monitoring** to the app
+launching Python (your terminal in dev), then restart. The menu-bar icon is
+**red until ready**, **green** when live.
 
-```bash
-PYTHONPATH=src python -m voice_wheel.macos_app
-```
+The Whisper model and the Piper voice **download themselves on first run** — no
+manual step.
 
-Hold your trigger (default: side mouse button #3 — configurable in `config.json`), speak, release. Result lands in the clipboard.
+---
 
-First, sanity-check the overlay doesn't steal focus:
+## Features
 
-```bash
-python spikes/overlay_focus_spike.py   # see the PASS/FAIL checklist in its docstring
-```
+- Radial wheel overlay (non-activating `NSPanel`) — never steals focus.
+- Side-mouse-button trigger via a Quartz event tap (on a dedicated thread).
+- **STT:** `mlx-whisper` (Apple Silicon) / `faster-whisper` (fallback), Russian by default.
+- **LLM:** Ollama (local, default) · Claude Max (`claude_warm`/`claude_cli`) · Anthropic API. Per-sector model override.
+- **TTS read-aloud:** Piper local neural voice (default) or macOS voices; speaks the selection or clipboard.
+- Menu-bar agent: color-coded ready state, **History** (re-copy a past result), **Settings**, Quit.
+- Native **Settings** window — edit everything without touching JSON.
+- Prompts as editable `.md` files; concurrent-recording toggle; cancel gesture.
+
+---
 
 ## LLM backends
 
-Set `llm.backend` in `config.json`:
+Set `llm.backend` in **Settings** (or `config.json`):
 
 | backend | speed | cost | notes |
 |---|---|---|---|
-| `ollama` (default) | ~2s, stable | free, local | needs Ollama + a model (`qwen2.5:7b`). Private, no key. |
-| `claude_warm` | ~2–13s (rate-limit jitter) | free w/ Claude Max | spawns `claude` CLI on press so startup hides behind recording. Best quality. |
-| `anthropic` | ~1–2s | paid | needs `ANTHROPIC_API_KEY`. Fastest + best. |
+| `ollama` (default) | ~2s | free, local | needs Ollama + a model (`qwen2.5:7b`). Private, no key. |
+| `claude_warm` | ~2–13s (jitter) | free w/ Claude Max | spawns the `claude` CLI on press so startup hides behind recording. Best quality. |
+| `anthropic` | ~1–2s | paid | needs `ANTHROPIC_API_KEY`. Fastest. |
 | `claude_cli` | ~5–10s | free w/ Claude Max | simple one-shot CLI call. |
 
-## Customize (no GUI — just edit files)
+---
+
+## Voice (TTS)
+
+Choose in **Settings → Голос**:
+
+- **Piper** (default) — local **neural** voices, offline, free. RU: Irina, Денис, Руслан, Дмитрий. The chosen voice auto-downloads (~63 MB) on first use.
+- **macOS** — system voices. For natural ones, use the "download premium voices" button (opens the system pane; Apple gives no API to fetch them silently).
+
+The design for the upcoming three-connection-type settings is in
+**[SETTINGS.md](SETTINGS.md)**.
+
+---
+
+## Customize
 
 **Sectors / prompts** — the `prompts/` folder. Each `N-Label.md` is one sector:
-number = order, filename = label, file body = the processing prompt. The wheel
-splits into as many sectors as there are files.
+number = order, filename = label, body = the processing prompt. The wheel splits
+into as many sectors as there are files. Edit to change behavior, add `5-QA.md`
+to add a sector, delete one to remove it. **Restart to apply.**
 
-```bash
-prompts/
-  1-Нормализация.md   # body: "Нормализуй распознанную речь: ..."
-  2-Деловой.md
-  3-Кратко.md
-  4-Дружелюбно.md
-```
-
-Edit a file to change how that sector processes text; add `5-QA.md` to add a
-sector; delete one to remove it. **Restart the app to apply.**
-
-**Trigger** — `config.json` → `hotkey`:
+**Trigger** — Settings, or `config.json → hotkey`:
 
 ```jsonc
-{"kind": "mouse_side", "key": "3"}   // side button (3 = back, 4 = forward) — default
-{"kind": "keyboard",   "key": "f8"}  // hold a key (any pynput key name)
-{"kind": "mouse",      "key": "middle"}  // left / right / middle
+{"kind": "mouse_side", "key": "3"}      // side button (3 = back, 4 = forward) — default
+{"kind": "keyboard",   "key": "f8"}     // hold any pynput key
+{"kind": "mouse",      "key": "middle"} // left / right / middle
 ```
 
-**LLM backend** — `config.json` → `llm.backend` (see the table above). Restart after editing.
-
-## Troubleshooting
-
-- **Trigger does nothing** → grant **Accessibility** to the binary running Python, then restart (the app pops the prompt on first run).
-- **No audio / always empty (red ping)** → grant **Microphone**; check the mic isn't muted.
-- **Sectors return raw text (orange ping)** → the LLM backend isn't reachable. For `ollama`: `brew services start ollama`, then `ollama list` (run `ollama pull qwen2.5:7b` if missing). For `anthropic`: set `ANTHROPIC_API_KEY`.
-- **`claude_warm` is slow / jittery** → Claude Max rate limits; switch to `ollama` for consistent speed.
-- **Stuck spinner / trigger frozen** → just press the trigger again; a new press self-heals any stuck state.
+---
 
 ## Project layout
 
 ```
 src/voice_wheel/
-  macos_app.py     # controller: trigger → record → wheel → process → clipboard → pulse
-  wheel_overlay.py # the radial wheel (non-activating NSPanel)
-  mouse_tap.py     # side-button trigger (Quartz event tap)
-  pulse.py         # completion pulse at the cursor
-  recorder.py      # in-memory audio capture (sounddevice)
-  stt.py           # speech-to-text (mlx-whisper, faster-whisper fallback)
-  modes.py         # rings/sectors + prompts
-  pipeline.py      # routing: dictate / transform / context
-  llm.py           # LLM backends (ollama / claude_warm / claude_cli / anthropic)
-  clipboard.py     # NSPasteboard read/write + previous-clipboard stack
-  history.py       # SQLite, last N results
-  config.py        # config loading
-spikes/            # overlay focus de-risk
-tests/             # pipeline / modes / clipboard / history
-config.example.json
-FEATURES.md        # feature tracker
+  __main__.py            entry: `python -m voice_wheel` (picks platform by sys.platform)
+  core/                  platform-agnostic (no PyObjC)
+    config, modes, pipeline, llm, claude_warm, stt, recorder,
+    history, job_tracker, wheel_geometry, piper_tts
+  hostos/macos/          PyObjC (UI/IO under macOS)
+    macos_app, wheel_overlay, mouse_tap, triggers, pulse,
+    settings, tray, tts, clipboard
+prompts/                 sector prompts (N-Label.md)
+tests/                   core unit tests (pytest)
 ```
+
+`core/` never imports `hostos/`; `hostos/ → core`. See
+**[ARCHITECTURE.md](ARCHITECTURE.md)**.
+
+---
+
+## Troubleshooting
+
+- **Trigger does nothing / icon stays red** → grant **Accessibility**, restart.
+- **Empty result (red ping)** → grant **Microphone**; a <0.35s tap is skipped on purpose.
+- **Raw text instead of processed (orange ping)** → LLM backend unreachable (start Ollama / pull the model / set the API key).
+- **Stuck spinner** → press the trigger again; a new press self-heals.
+
+More in **[SETUP.md](SETUP.md)**.
+
+---
+
+## Docs
+
+- **[SETUP.md](SETUP.md)** — install & configure on a fresh Mac.
+- **[SETTINGS.md](SETTINGS.md)** — settings design (current + v2 vision).
+- **[FEATURES.md](FEATURES.md)** — feature tracker.
+- **[ARCHITECTURE.md](ARCHITECTURE.md)** — architecture & tech-debt log.
