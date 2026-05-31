@@ -32,6 +32,10 @@ GRACE=12         # ignore the heartbeat for the first N seconds (boot / warm-up)
 
 pkill -f "voice_wheel" 2>/dev/null || true
 sleep 0.5
+# SIGTERM is unreliable on a Cocoa app; force-kill any survivor so it releases the
+# single-instance lock (flock) before we relaunch — otherwise the fresh start would
+# see the lock held and exit.
+pkill -9 -f "voice_wheel" 2>/dev/null || true
 echo "▶ Voice Wheel запускается…  (Ctrl+C или «Выход» в меню-баре — остановить)"
 
 APP_PID=""

@@ -15,6 +15,7 @@ blocks. Only NSPanel/NSView work touches the main thread.
 from __future__ import annotations
 
 import atexit
+import fcntl
 import logging
 import os
 import threading
@@ -508,8 +509,53 @@ def _load_dotenv() -> None:
         os.environ.setdefault(key, value)
 
 
+# Kept open for the whole process lifetime — closing it would drop the flock.
+_instance_lock_fd = None
+
+
+def _acquire_single_instance_lock() -> bool:
+    """Allow only one Voice Wheel at a time (a second launch would add a duplicate
+    menu-bar icon and a competing event tap).
+
+    We hold an exclusive ``flock`` on a lock file for the whole process lifetime.
+    The OS releases it automatically when the process dies — even on SIGKILL — so
+    there's no stale-PID file to reason about. An in-place restart (``os.execv``)
+    is unaffected: Python opens fds close-on-exec by default, so the lock fd is
+    closed by exec, the lock drops, and the re-exec'd image re-acquires it here in
+    ``main`` (nothing else competes during a self-restart). Returns False iff
+    another instance already holds the lock."""
+    global _instance_lock_fd
+    lock_path = app_support_dir() / "voice_wheel.lock"
+    try:
+        fd = open(lock_path, "a+")  # "a+" so we never truncate a holder's pid file
+    except OSError as exc:  # can't create the lock -> don't block startup over it
+        log.warning("single-instance lock unavailable (%s); continuing", exc)
+        return True
+    try:
+        fcntl.flock(fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        fd.close()
+        return False  # someone else holds it
+    try:
+        fd.seek(0)
+        fd.truncate()
+        fd.write(str(os.getpid()))
+        fd.flush()
+    except OSError:  # pid bookkeeping is informational; the lock is what matters
+        pass
+    _instance_lock_fd = fd
+    return True
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+    if not _acquire_single_instance_lock():
+        print(
+            "Voice Wheel уже запущен — второй экземпляр не нужен. Закрываю этот.",
+            flush=True,
+        )
+        log.info("another Voice Wheel instance already holds the lock; exiting")
+        return
     _load_dotenv()
     app = NSApplication.sharedApplication()
     app.setActivationPolicy_(NSApplicationActivationPolicyAccessory)
