@@ -59,6 +59,7 @@ class VoiceWheel(NSObject):
         self._concurrent = bool(getattr(config, "concurrent", False))
         self._recording = False
         self._triggers_ok = False    # green icon only once the trigger is actually live
+        self._tts_capturing = False  # guards the ⌘C selection-grab from double-fire
         self._tick_timer = None
         # All cross-thread state (cycle id, inflight count, result queue) lives here.
         self._jobs = JobTracker()
@@ -122,7 +123,33 @@ class VoiceWheel(NSObject):
             print("STT прогрет, готов к работе.", flush=True)
         except Exception as exc:  # noqa: BLE001
             log.warning("warm-up: %s", exc)
+        self._prepare_voice()
         self.performSelectorOnMainThread_withObject_waitUntilDone_("warmReady:", None, False)
+
+    @objc.python_method
+    def _prepare_voice(self):
+        """Download + load the Piper voice now (first run fetches ~60 MB) so the
+        first press isn't delayed. If it can't be prepared (offline), fall back to
+        the macOS system voice instead of failing on the first press."""
+        speaker = self._speaker
+        if not hasattr(speaker, "prepare"):
+            return  # the system (macOS) voice needs no preparation
+        print("Готовлю голос Piper (при первом запуске скачается ~60 МБ)…", flush=True)
+        if speaker.prepare():
+            print("Голос Piper готов.", flush=True)
+        else:
+            print("⚠️  Не удалось подготовить голос Piper — переключаюсь на системный.", flush=True)
+            self.performSelectorOnMainThread_withObject_waitUntilDone_(
+                "useSystemVoiceFallback:", None, False
+            )
+
+    def useSystemVoiceFallback_(self, _sender):  # noqa: N802
+        try:
+            self._speaker = Speaker(self._config.tts.voice)
+            log.info("TTS fell back to the macOS system voice")
+        except Exception as exc:  # noqa: BLE001
+            log.warning("system voice fallback failed: %s", exc)
+            self._speaker = None
 
     def warmReady_(self, _sender):  # noqa: N802
         self._menubar.set_ready(self._triggers_ok)  # green only if the trigger is live too
@@ -130,7 +157,31 @@ class VoiceWheel(NSObject):
     def onTts_(self, _sender):  # noqa: N802
         if self._speaker is None:
             return
-        state = self._speaker.toggle(self._clipboard.read_text())
+        if self._speaker.is_speaking():
+            self._speaker.stop()
+            print("TTS: stopped", flush=True)
+            return
+        if self._tts_capturing:
+            return  # a selection grab is already in flight
+        self._tts_capturing = True
+        # Grab the selection off the main thread (it posts ⌘C and polls), then
+        # hop back to the main thread to actually speak.
+        threading.Thread(target=self._capture_and_speak, daemon=True).start()
+
+    @objc.python_method
+    def _capture_and_speak(self):
+        """Worker thread: speak the current selection if any, else the clipboard."""
+        text = ""
+        try:
+            selection = self._clipboard.read_selection()
+            text = selection if selection else (self._clipboard.read_text() or "")
+        except Exception as exc:  # noqa: BLE001 - never leave _tts_capturing stuck
+            log.warning("selection capture failed: %s", exc)
+        self.performSelectorOnMainThread_withObject_waitUntilDone_("speakText:", text, False)
+
+    def speakText_(self, text):  # noqa: N802
+        self._tts_capturing = False
+        state = self._speaker.toggle(str(text))
         print(f"TTS: {state}", flush=True)
 
     @objc.python_method
