@@ -107,7 +107,7 @@ to add a sector, delete one to remove it. **Restart to apply.**
 
 ```jsonc
 {"kind": "mouse_side", "key": "3"}      // side button (3 = back, 4 = forward) — default
-{"kind": "keyboard",   "key": "f8"}     // hold any pynput key
+{"kind": "keyboard",   "key": "cmd+б"}  // a key or combo (combos dodge macOS media keys like F7–F9)
 {"kind": "mouse",      "key": "middle"} // left / right / middle
 ```
 

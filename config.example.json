@@ -1,8 +1,8 @@
 {
   "hotkey": {
-    "kind": "keyboard",
-    "key": "f8",
-    "_comment": "kind: 'keyboard' (pynput key name, e.g. 'f8', 'alt_r', 'cmd_r') or 'mouse' (button name, e.g. 'button9'). Hold-to-record only."
+    "kind": "mouse_side",
+    "key": "3",
+    "_comment": "kind: 'mouse_side' (side button number, e.g. '3','4') | 'keyboard' (key/combo, e.g. 'cmd+б','f8') | 'mouse' ('right'/'middle'). Hold-to-record only. NB: macOS reserves the media keys (F7–F9), so prefer a side mouse button."
   },
   "language": "ru",
   "stt": {
