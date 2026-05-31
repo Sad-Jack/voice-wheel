@@ -57,6 +57,23 @@ class PiperSpeaker:
             self._playing = False
         self._stop_playback()
 
+    def is_speaking(self) -> bool:
+        with self._lock:
+            return self._playing
+
+    def prepare(self) -> bool:
+        """Eagerly download + load the voice (call OFF the main thread, e.g. during
+        warm-up) so the first press isn't delayed. Returns True if the voice is
+        ready, False if it couldn't be fetched/loaded (e.g. offline) — the caller
+        can then fall back to a system voice.
+        """
+        try:
+            self._ensure_voice()
+            return True
+        except Exception as exc:  # noqa: BLE001 - report readiness, never raise
+            log.warning("piper voice prepare failed: %s", exc)
+            return False
+
     # -- background -----------------------------------------------------------
 
     def _speak(self, text: str, gen: int) -> None:

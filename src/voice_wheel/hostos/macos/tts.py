@@ -45,6 +45,9 @@ class Speaker:
         if self._synth.isSpeaking():
             self._synth.stopSpeakingAtBoundary_(_AV_BOUNDARY_IMMEDIATE)
 
+    def is_speaking(self) -> bool:
+        return bool(self._synth.isSpeaking())
+
     @staticmethod
     def _detect(text: str):
         try:
