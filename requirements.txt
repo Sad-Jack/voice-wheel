@@ -17,6 +17,9 @@ mlx-whisper>=0.4.0
 # STT — CPU fallback (cross-platform)
 faster-whisper>=1.0.0
 
+# TTS — local neural voice (offline; the voice model auto-downloads on first use)
+piper-tts>=1.4.0
+
 # LLM — cloud option (claude_cli/claude_warm use the `claude` CLI; ollama is external)
 anthropic>=0.40.0
 # HTTP client for the local Ollama backend
