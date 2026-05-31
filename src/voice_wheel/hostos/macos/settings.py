@@ -516,7 +516,32 @@ class SettingsWindow(NSObject):
         self._conn_radios[1][0].setState_(1)  # default to Ollama; _load re-applies
         self._apply_conn_visibility()
         self._wire_dirty()
+        self._set_tooltips()
         self._set_dirty(False)
+
+    @objc.python_method
+    def _set_tooltips(self):
+        """Short hover hints (#41) on the key controls — `NSView.setToolTip_`."""
+        t = self._t
+        for rb, tkey in self._conn_radios:
+            rb.setToolTip_(t({"api": "tip_conn_api", "ollama": "tip_conn_ollama",
+                              "cc": "tip_conn_cc"}[tkey]))
+        pairs = (
+            (self._provider, "tip_provider"), (self._api_key, "tip_api_key"),
+            (self._api_model, "tip_model"), (self._ollama, "tip_model"),
+            (self._ollama_url, "tip_ollama_url"), (self._dl_ollama, "tip_download"),
+            (self._cc_model, "tip_model"), (self._stt_backend, "tip_stt_backend"),
+            (self._stt_model, "tip_stt_model"), (self._lang, "tip_stt_lang"),
+            (self._tts_enabled, "tip_tts_enabled"), (self._tts_voice, "tip_tts_voice"),
+            (self._prem, "tip_premium"), (self._tts_kb, "tip_tts_trigger"),
+            (self._tts_ms_key, "tip_tts_trigger"), (self._wheel_kb, "tip_wheel_trigger"),
+            (self._wheel_ms_key, "tip_wheel_trigger"), (self._concurrent, "tip_concurrent"),
+            (self._uilang_popup, "tip_uilang"),
+            (self._cap_wheel_kb, "tip_catch"), (self._cap_wheel_ms, "tip_catch"),
+            (self._cap_tts_kb, "tip_catch"), (self._cap_tts_ms, "tip_catch"),
+        )
+        for ctl, key in pairs:
+            ctl.setToolTip_(t(key))
 
     # -- dirty tracking (Save button reflects unsaved changes) ----------------
 
