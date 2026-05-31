@@ -121,6 +121,20 @@ STR = {
         "Мышь можно оставить пустой, если её нет — хватит клавиатуры.",
         "Leave the mouse row empty if you have no mouse — the keyboard is enough.",
     ),
+    "trig_check_hint": (
+        "Галочка слева включает/выключает вид триггера; выключенный — заблокирован. "
+        "Хотя бы один должен быть включён.",
+        "The checkbox on the left enables/disables a trigger type; a disabled one is "
+        "locked. At least one must be enabled.",
+    ),
+    "note_no_trigger": (
+        "Включи хотя бы один триггер записи (клавиатуру или мышь).",
+        "Enable at least one record trigger (keyboard or mouse).",
+    ),
+    "tip_trig_toggle": (
+        "Галочка — включить/выключить этот вид триггера.",
+        "Checkbox — enable/disable this trigger type.",
+    ),
     "trig_restart": (
         "⏱ Смена триггера применится сразу: при «Сохранить» приложение перезапустится.",
         "⏱ A trigger change applies right away: the app restarts on «Save».",
