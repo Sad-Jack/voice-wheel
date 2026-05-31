@@ -27,7 +27,7 @@ from AppKit import (
     NSEvent,
     NSTimer,
 )
-from Foundation import NSObject
+from Foundation import NSRunLoop, NSRunLoopCommonModes, NSObject
 from PyObjCTools import AppHelper
 
 from ...core.config import Config, app_support_dir
@@ -141,12 +141,21 @@ class VoiceWheel(NSObject):
         # main thread hangs (a freeze), the file goes stale and the run.sh supervisor
         # kills + restarts the app (#48).
         self._heartbeat_path = app_support_dir() / "heartbeat"
-        NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
+        # Common run-loop modes so the heartbeat keeps firing even inside a modal
+        # loop (e.g. the first-run onboarding NSAlert) — otherwise it would go stale
+        # and the supervisor would think we hung.
+        hb = NSTimer.timerWithTimeInterval_target_selector_userInfo_repeats_(
             1.0, self, "heartbeat:", None, True
         )
+        NSRunLoop.currentRunLoop().addTimer_forMode_(hb, NSRunLoopCommonModes)
         hk = self._config.hotkeys[0] if self._config.hotkeys else None
         trigger_desc = f"{hk.kind}:{hk.key}" if hk else "—"
         print(_tr("ready_msg", self._lang).format(trigger_desc), flush=True)
+        # First run (no config.json yet) -> a welcome that points to Settings (#42).
+        from ...core.config import _project_root
+
+        if not (_project_root() / "config.json").exists():
+            self.performSelector_withObject_afterDelay_("showOnboarding:", None, 1.0)
 
     def heartbeat_(self, _timer):  # noqa: N802
         try:
@@ -373,6 +382,32 @@ class VoiceWheel(NSObject):
             sd.stop()
         except Exception as exc:  # noqa: BLE001
             log.debug("cleanup (audio): %s", exc)
+
+    @objc.python_method
+    def _onboarding_alert(self):
+        from AppKit import NSAlert
+
+        alert = NSAlert.alloc().init()
+        alert.setMessageText_(_tr("onboard_title", self._lang))
+        alert.setInformativeText_(_tr("onboard_body", self._lang))
+        alert.addButtonWithTitle_(_tr("onboard_open", self._lang))   # default = open settings
+        alert.addButtonWithTitle_(_tr("onboard_later", self._lang))
+        return alert
+
+    def showOnboarding_(self, _arg):  # noqa: N802
+        from AppKit import (
+            NSAlertFirstButtonReturn,
+            NSApplicationActivationPolicyAccessory,
+            NSApplicationActivationPolicyRegular,
+        )
+
+        app = NSApplication.sharedApplication()
+        app.setActivationPolicy_(NSApplicationActivationPolicyRegular)  # so the dialog is focusable
+        app.activateIgnoringOtherApps_(True)
+        if self._onboarding_alert().runModal() == NSAlertFirstButtonReturn:
+            self._settings_win.show()  # show() keeps the regular policy + opens the window
+        else:
+            app.setActivationPolicy_(NSApplicationActivationPolicyAccessory)
 
     @objc.python_method
     def _restart(self):

@@ -172,6 +172,26 @@ STR = {
         "Opened «Spoken Content»: download a voice (Enhanced/Premium), then pick "
         "«macOS» in the voice list. Applies after restart.",
     ),
+    # first-run onboarding (#42)
+    "onboard_title": (
+        "Добро пожаловать в Voice Wheel!",
+        "Welcome to Voice Wheel!",
+    ),
+    "onboard_body": (
+        "Чтобы обрабатывать речь через ИИ, настрой подключение:\n\n"
+        "1) Выбери способ — Ollama (локально, бесплатно), Прямой API (по ключу) "
+        "или Claude Code.\n"
+        "2) Выбери или скачай модель.\n"
+        "3) Нажми «Сохранить».\n\n"
+        "Без настройки распознавание речи всё равно работает — просто без обработки ИИ.",
+        "To process speech with AI, set up a connection:\n\n"
+        "1) Pick a type — Ollama (local, free), Direct API (by key), or Claude Code.\n"
+        "2) Choose or download a model.\n"
+        "3) Click «Save».\n\n"
+        "Without setup, speech recognition still works — just without the AI step.",
+    ),
+    "onboard_open": ("Открыть настройки", "Open Settings"),
+    "onboard_later": ("Позже", "Later"),
     # menu bar
     "menu_history": ("История", "History"),
     "menu_settings": ("Настройки…", "Settings…"),
