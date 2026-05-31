@@ -302,7 +302,7 @@ class SettingsWindow(NSObject):
         rowlabel("Кнопка озвучки")
         self._tts_kind = popup(KINDS, x=190, w=105)
         self._tts_key = field(x=300, w=82)
-        btn("Поймать", "captureTts:", 388, 100)
+        self._cap_tts = btn("Поймать", "captureTts:", 388, 100)
         hint("вид + кнопка/клавиша, или «Поймать» → нажми нужную.")
 
         # ---- Triggers tab ----
@@ -508,7 +508,7 @@ class SettingsWindow(NSObject):
     def _apply_tts_enabled(self):
         """Disable the voice + read-aloud-button controls when TTS is off."""
         on = bool(self._tts_enabled.state())
-        for ctl in (self._tts_voice, self._prem, self._tts_kind, self._tts_key):
+        for ctl in (self._tts_voice, self._prem, self._tts_kind, self._tts_key, self._cap_tts):
             ctl.setEnabled_(on)
 
     def ttsEnabledChanged_(self, _sender):  # noqa: N802
