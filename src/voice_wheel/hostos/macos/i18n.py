@@ -159,8 +159,10 @@ STR = {
         "Changes the language of the whole app (menu and settings). Defaults to your system.",
     ),
     "restart_warn_global": (
-        "⚠️ Несохранённые изменения (язык / триггеры / STT) перезапустят приложение при «Сохранить».",
-        "⚠️ Unsaved changes (language / triggers / STT) will restart the app on «Save».",
+        "⚠️ Изменения языка, триггеров и модели распознавания (STT) применяются "
+        "только после перезапуска приложения — он произойдёт автоматически при «Сохранить».",
+        "⚠️ Changes to the language, triggers and recognition model (STT) take effect "
+        "only after a restart — it happens automatically on «Save».",
     ),
     # buttons / runtime notes
     "catch": ("Поймать", "Catch"),

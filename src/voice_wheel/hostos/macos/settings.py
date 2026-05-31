@@ -206,7 +206,8 @@ TTS_VOICES = [
     ("piper", "ru_RU-dmitri-medium", ("Piper: Дмитрий — нейро (RU, муж.)", "Piper: Dmitri — neural (RU, male)")),
 ]
 W = 520
-H = 440
+H = 464  # +24 over the original 440 for the top restart banner (the old bottom
+         # banner gap was reclaimed, so the window grew less than the banner's height)
 
 
 class SettingsWindow(NSObject):
@@ -283,14 +284,17 @@ class SettingsWindow(NSObject):
         win.setDelegate_(self)
         root = win.contentView()
 
-        tabs = NSTabView.alloc().initWithFrame_(NSMakeRect(10, 70, W - 20, H - 80))
+        # Tabs sit between the bottom button bar (top ≈42) and the top restart
+        # banner. y=54 leaves a ~12px gap above the buttons (the old bottom-banner
+        # gap is gone), top ≈418 sits just under the banner.
+        tabs = NSTabView.alloc().initWithFrame_(NSMakeRect(10, 54, W - 20, H - 100))
         root.addSubview_(tabs)
         self._tabs = tabs
 
         stack = [None]   # the current tab's vertical NSStackView (Auto-Layout, auto-aligns)
 
         def add_tab(key, scroll=False):
-            tab_w, tab_h = W - 28, H - 118
+            tab_w, tab_h = W - 28, H - 138  # tracks the tabs frame height (− tab bar/insets)
             v = NSStackView.alloc().init()
             v.setOrientation_(NSUserInterfaceLayoutOrientationVertical)
             v.setAlignment_(NSLayoutAttributeLeading)
@@ -549,14 +553,16 @@ class SettingsWindow(NSObject):
         stack[0].addArrangedSubview_(self._uilang_popup)
         hint("lang_hint")
 
-        # ---- always-visible restart warning (above the bottom bar), shown only when
-        #      the pending unsaved changes actually require a restart ----
+        # ---- always-visible restart banner, pinned to the TOP above the tabs so the
+        #      user always knows which settings cost a restart. Fully static (same text
+        #      and weight always) and wraps to 2 lines, so it never shifts or truncates.
         self._restart_warn = NSTextField.labelWithString_(T("restart_warn_global"))
-        self._restart_warn.setFrame_(NSMakeRect(16, 46, W - 32, 18))
+        self._restart_warn.setFrame_(NSMakeRect(16, H - 44, W - 32, 34))
         self._restart_warn.setFont_(NSFont.systemFontOfSize_(11))
         self._restart_warn.setTextColor_(NSColor.systemOrangeColor())
-        self._restart_warn.setLineBreakMode_(NSLineBreakByTruncatingTail)
-        self._restart_warn.setHidden_(True)
+        self._restart_warn.setUsesSingleLineMode_(False)
+        self._restart_warn.setLineBreakMode_(NSLineBreakByWordWrapping)
+        self._restart_warn.setMaximumNumberOfLines_(2)
         root.addSubview_(self._restart_warn)
 
         # ---- bottom bar: Reset (left) · note · Save (right) ----
@@ -648,20 +654,19 @@ class SettingsWindow(NSObject):
         """Remember the current form as the 'saved' state; Save goes disabled."""
         self._baseline = self._full_snapshot()
         self._set_dirty(False)
-        self._update_restart_warn()
 
     @objc.python_method
     def _recompute_dirty(self):
         """Save reflects whether the form actually differs from the saved state, so
         reverting a change (or a reset that lands back on the saved values) disarms it."""
         self._set_dirty(self._full_snapshot() != self._baseline)
-        self._update_restart_warn()
 
     @objc.python_method
     def _restart_changed(self, old, new_lang, new_wheel, new_tts, new_stt_backend, new_stt_model):
         """Do these new values differ from the saved config in a way that needs a
         restart? — language / triggers / STT, none of which can be swapped live.
-        Single source of truth for both save_ (the decision) and the warning label."""
+        Used by save_ to decide whether to relaunch. The top banner is a static,
+        always-visible reminder, so it doesn't depend on this."""
         return (
             new_lang != resolve_lang(old.get("ui_language"))
             or self._trigger_sig(old.get("hotkey")) != self._trigger_sig(new_wheel)
@@ -669,25 +674,6 @@ class SettingsWindow(NSObject):
             or str(old.get("stt", {}).get("backend", STTConfig.backend)) != new_stt_backend
             or str(old.get("stt", {}).get("model", STTConfig.model)) != new_stt_model
         )
-
-    @objc.python_method
-    def _restart_pending(self):
-        """Would saving NOW restart the app? (compares live controls to the saved config)."""
-        return self._restart_changed(
-            self._read(),
-            "ru" if int(self._uilang_popup.indexOfSelectedItem()) == 0 else "en",
-            self._collect_trigger(self._wheel_kb_on, self._wheel_kb, self._wheel_ms_on,
-                                  self._wheel_ms, self._wheel_ms_map),
-            self._collect_trigger(self._tts_kb_on, self._tts_kb, self._tts_ms_on,
-                                  self._tts_ms, self._tts_ms_map),
-            str(self._stt_backend.titleOfSelectedItem()),
-            str(self._stt_model.titleOfSelectedItem()),
-        )
-
-    @objc.python_method
-    def _update_restart_warn(self):
-        if self._restart_warn is not None:
-            self._restart_warn.setHidden_(not (self._dirty and self._restart_pending()))
 
     def markDirty_(self, _sender):  # noqa: N802
         self._recompute_dirty()
