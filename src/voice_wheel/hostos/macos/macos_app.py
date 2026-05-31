@@ -18,6 +18,7 @@ import atexit
 import logging
 import os
 import threading
+import time
 
 import objc
 from AppKit import (
@@ -130,11 +131,24 @@ class VoiceWheel(NSObject):
         if not self._triggers_ok:
             print("⚠️  Нет доступа Accessibility — триггер не сработает (см. выше).", flush=True)
         threading.Thread(target=self._warm_up, daemon=True).start()
+        # Liveness heartbeat — a main-thread timer touches a file every second. If the
+        # main thread hangs (a freeze), the file goes stale and the run.sh supervisor
+        # kills + restarts the app (#48).
+        self._heartbeat_path = app_support_dir() / "heartbeat"
+        NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
+            1.0, self, "heartbeat:", None, True
+        )
         print(
             f"Voice Wheel готов. Зажми {self._config.hotkey.kind}:{self._config.hotkey.key}, "
             "говори, отпусти. Центр = текст, сектор = стиль. Ctrl+C для выхода.",
             flush=True,
         )
+
+    def heartbeat_(self, _timer):  # noqa: N802
+        try:
+            self._heartbeat_path.write_text(str(int(time.time())))
+        except Exception as exc:  # noqa: BLE001 - heartbeat must never raise
+            log.debug("heartbeat write failed: %s", exc)
 
     def _warm_up(self):
         try:

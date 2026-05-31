@@ -24,9 +24,45 @@ if grep -q '"backend"[[:space:]]*:[[:space:]]*"ollama"' config.json 2>/dev/null;
   fi
 fi
 
-# --- one clean instance ---
+# --- supervised run: auto-restart on crash or freeze (heartbeat watchdog, #48) ---
+HEARTBEAT="$HOME/Library/Application Support/VoiceWheel/heartbeat"
+STALE_AFTER=15   # seconds with no heartbeat = main thread hung -> kill + restart
+GRACE=12         # ignore the heartbeat for the first N seconds (boot / warm-up)
+
 pkill -f "voice_wheel" 2>/dev/null || true
 sleep 0.5
-
 echo "▶ Voice Wheel запускается…  (Ctrl+C или «Выход» в меню-баре — остановить)"
-exec env PYTHONPATH=src "$PY" -u -m voice_wheel
+
+APP_PID=""
+cleanup() { [ -n "$APP_PID" ] && kill "$APP_PID" 2>/dev/null; exit 0; }
+trap cleanup INT TERM
+
+set +e   # the loop handles non-zero exits itself
+while true; do
+  rm -f "$HEARTBEAT"
+  env PYTHONPATH=src "$PY" -u -m voice_wheel &
+  APP_PID=$!
+  started=$(date +%s)
+  hung=0
+  while kill -0 "$APP_PID" 2>/dev/null; do
+    sleep 3
+    now=$(date +%s)
+    [ $((now - started)) -lt "$GRACE" ] && continue
+    if [ -f "$HEARTBEAT" ]; then
+      age=$(( now - $(stat -f %m "$HEARTBEAT" 2>/dev/null || echo "$now") ))
+      if [ "$age" -gt "$STALE_AFTER" ]; then
+        echo "⚠️  Зависание (нет heartbeat ${age}с) — перезапускаю…"
+        kill -9 "$APP_PID" 2>/dev/null
+        hung=1
+        break
+      fi
+    fi
+  done
+  wait "$APP_PID"; code=$?
+  if [ "$hung" -eq 0 ] && [ "$code" -eq 0 ]; then
+    echo "✓ Остановлено («Выход»)."
+    break
+  fi
+  echo "↻ Перезапуск (код $code)…"
+  sleep 1
+done
