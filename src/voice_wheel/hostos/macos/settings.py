@@ -619,13 +619,46 @@ class SettingsWindow(NSObject):
 
     def resetCurrentTab_(self, _sender):  # noqa: N802
         ident = str(self._tabs.selectedTabViewItem().identifier())
-        {
+        reset = {
             "tab_llm": self.resetLlm_,
             "tab_stt": self.resetStt_,
             "tab_voice": self.resetVoice_,
             "tab_triggers": self.resetTriggers_,
             "tab_lang": self.resetLang_,
-        }.get(ident, lambda _s: None)(_sender)
+        }.get(ident)
+        if reset is None:
+            return
+        before = self._tab_snapshot(ident)
+        reset(_sender)
+        if self._tab_snapshot(ident) != before:  # only a real change arms Save
+            self._set_dirty(True)
+
+    @objc.python_method
+    def _tab_snapshot(self, ident):
+        """A comparable view of a tab's config-relevant control values, so a reset
+        that lands on values already in place doesn't needlessly arm Save."""
+        if ident == "tab_llm":
+            rules = tuple(
+                (self._rule_sector_key(r), self._backend_value(r["engine"]),
+                 str(r["model"].stringValue()))
+                for r in self._rules
+            )
+            return (self._backend_value(self._backend), str(self._ollama.stringValue()),
+                    str(self._claude.stringValue()), rules)
+        if ident == "tab_stt":
+            return (str(self._stt_backend.titleOfSelectedItem()),
+                    str(self._stt_model.titleOfSelectedItem()),
+                    str(self._lang.titleOfSelectedItem()))
+        if ident == "tab_voice":
+            return (int(self._tts_enabled.state()), int(self._tts_voice.indexOfSelectedItem()),
+                    str(self._tts_kb.stringValue()), str(self._tts_ms_kind.titleOfSelectedItem()),
+                    str(self._tts_ms_key.stringValue()))
+        if ident == "tab_triggers":
+            return (str(self._wheel_kb.stringValue()), str(self._wheel_ms_kind.titleOfSelectedItem()),
+                    str(self._wheel_ms_key.stringValue()), int(self._concurrent.state()))
+        if ident == "tab_lang":
+            return (int(self._uilang_popup.indexOfSelectedItem()),)
+        return ()
 
     def resetLlm_(self, _sender):  # noqa: N802
         from ...core.config import LLMConfig
@@ -639,7 +672,6 @@ class SettingsWindow(NSObject):
             self._rules_stack.removeView_(r["row"])
         self._rules = []
         self._refresh_add_button()
-        self._set_dirty(True)
 
     def resetStt_(self, _sender):  # noqa: N802
         from ...core.config import STTConfig
@@ -648,7 +680,6 @@ class SettingsWindow(NSObject):
         self._stt_backend.selectItemWithTitle_(d.backend)
         self._stt_model.selectItemWithTitle_(d.model)
         self._lang.selectItemWithTitle_("ru")
-        self._set_dirty(True)
 
     def resetVoice_(self, _sender):  # noqa: N802
         from ...core.config import TTSConfig
@@ -661,7 +692,6 @@ class SettingsWindow(NSObject):
             [{"kind": h.kind, "key": h.key} for h in d.hotkeys], default_ms_key="4",
         )
         self._apply_tts_enabled()
-        self._set_dirty(True)
 
     def resetTriggers_(self, _sender):  # noqa: N802
         from ...core.config import HotkeyConfig
@@ -672,12 +702,10 @@ class SettingsWindow(NSObject):
             [{"kind": d.kind, "key": d.key}], default_ms_key="3",
         )
         self._concurrent.setState_(0)
-        self._set_dirty(True)
 
     def resetLang_(self, _sender):  # noqa: N802
         default = detect_ui_lang()  # back to the system default
         self._uilang_popup.selectItemAtIndex_(0 if default == "ru" else 1)
-        self._set_dirty(True)
 
     # -- per-prompt model rules ----------------------------------------------
 
