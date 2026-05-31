@@ -27,7 +27,6 @@ STR = {
         "What turns recognized speech into the result for the sector's prompt.",
     ),
     "ollama_model": ("Модель Ollama", "Ollama model"),
-    "claude_model": ("Модель Claude", "Claude model"),
     "rules_header": ("🎛 Модель на промпт — правила (опц.)", "🎛 Per-prompt model — rules (opt.)"),
     "rules_hint": (
         "Базовая (выше) — для всех промптов. Правило задаёт свою модель отдельному.",

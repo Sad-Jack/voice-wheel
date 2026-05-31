@@ -14,6 +14,9 @@
 
 - ``anthropic``: the Anthropic API with a key (fastest + best, needs billing).
 
+- ``openai``: the OpenAI API with a key (``OPENAI_API_KEY``). Chat Completions;
+  OpenAI caches long prompts automatically, so no explicit cache_control.
+
 Two hard-won CLI rules (apply to claude_warm/claude_cli): run from a neutral dir
 so the project context doesn't leak in, and put the instruction in the user
 message — NOT in --append-system-prompt (the CLI flags that as injection).
@@ -44,6 +47,7 @@ class LLMClient:
         self._backend = getattr(config, "backend", "ollama")
         self._sector_models = sector_models or {}  # sector_key -> {backend, model}
         self._client = None  # anthropic.Anthropic, lazily built
+        self._openai = None  # openai.OpenAI, lazily built
         self._claude = None  # resolved path to the claude CLI
         self._ollama_ok = None
         self._warm = None  # ClaudeWarmProcess, spawned on prewarm() for claude_warm
@@ -61,6 +65,8 @@ class LLMClient:
             return self._claude_path() is not None
         if backend == "ollama":
             return self._ollama_reachable()
+        if backend == "openai":
+            return bool(os.environ.get("OPENAI_API_KEY"))
         return bool(os.environ.get("ANTHROPIC_API_KEY"))
 
     def _effective(self, sector_key) -> tuple[str, str]:
@@ -80,6 +86,8 @@ class LLMClient:
                 log.debug("ollama warm-up skipped: %s", exc)
         elif self._backend == "anthropic" and self.available:
             self._ensure_client()
+        elif self._backend == "openai" and self.available:
+            self._ensure_openai()  # build the client now (skip first-call TLS stall)
         # claude_warm/claude_cli: nothing to pre-warm globally (per-press prewarm).
 
     def complete(self, system: str, user: str, sector_key: str | None = None) -> str:
@@ -93,6 +101,8 @@ class LLMClient:
             return self._complete_cli(system, user, model)
         if backend == "ollama":
             return self._complete_ollama(system, user, model)
+        if backend == "openai":
+            return self._complete_openai(system, user, model)
         return self._complete_api(system, user, model)
 
     # -- pre-warm lifecycle (claude_warm) -------------------------------------
@@ -208,3 +218,31 @@ class LLMClient:
 
             self._client = Anthropic()
         return self._client
+
+    # -- openai backend -------------------------------------------------------
+
+    def _complete_openai(self, system: str, user: str, model: str | None = None) -> str:
+        client = self._ensure_openai()
+        resp = client.chat.completions.create(
+            model=model or self._cfg.model,
+            max_tokens=self._cfg.max_tokens,
+            temperature=0.3,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+        )
+        return (resp.choices[0].message.content or "").strip()
+
+    def _ensure_openai(self):
+        if not os.environ.get("OPENAI_API_KEY"):
+            raise LLMUnavailableError("OPENAI_API_KEY is not set.")
+        if self._openai is None:
+            try:
+                from openai import OpenAI
+            except ImportError as exc:  # package not installed
+                raise LLMUnavailableError(
+                    "the `openai` package is not installed (pip install openai)."
+                ) from exc
+            self._openai = OpenAI()
+        return self._openai
