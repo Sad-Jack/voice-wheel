@@ -206,7 +206,7 @@ TTS_VOICES = [
     ("piper", "ru_RU-dmitri-medium", ("Piper: Дмитрий — нейро (RU, муж.)", "Piper: Dmitri — neural (RU, male)")),
 ]
 W = 520
-H = 440
+H = 480  # +40 over the original 440 for the always-visible restart banner at the top
 
 
 class SettingsWindow(NSObject):
@@ -283,14 +283,16 @@ class SettingsWindow(NSObject):
         win.setDelegate_(self)
         root = win.contentView()
 
-        tabs = NSTabView.alloc().initWithFrame_(NSMakeRect(10, 70, W - 20, H - 80))
+        # Tabs sit between the bottom button bar (y≈70 down) and the top restart
+        # banner; their top is lowered by the banner's height (≈36) vs. a full window.
+        tabs = NSTabView.alloc().initWithFrame_(NSMakeRect(10, 70, W - 20, H - 116))
         root.addSubview_(tabs)
         self._tabs = tabs
 
         stack = [None]   # the current tab's vertical NSStackView (Auto-Layout, auto-aligns)
 
         def add_tab(key, scroll=False):
-            tab_w, tab_h = W - 28, H - 118
+            tab_w, tab_h = W - 28, H - 154  # tracks the tabs frame height (− tab bar/insets)
             v = NSStackView.alloc().init()
             v.setOrientation_(NSUserInterfaceLayoutOrientationVertical)
             v.setAlignment_(NSLayoutAttributeLeading)
@@ -549,14 +551,16 @@ class SettingsWindow(NSObject):
         stack[0].addArrangedSubview_(self._uilang_popup)
         hint("lang_hint")
 
-        # ---- always-visible restart warning (above the bottom bar), shown only when
-        #      the pending unsaved changes actually require a restart ----
+        # ---- always-visible restart banner, pinned to the TOP above the tabs so the
+        #      user always knows which settings cost a restart. Wraps (2 lines) instead
+        #      of truncating; turns bold when the current unsaved edits would restart now.
         self._restart_warn = NSTextField.labelWithString_(T("restart_warn_global"))
-        self._restart_warn.setFrame_(NSMakeRect(16, 46, W - 32, 18))
+        self._restart_warn.setFrame_(NSMakeRect(16, H - 44, W - 32, 34))
         self._restart_warn.setFont_(NSFont.systemFontOfSize_(11))
         self._restart_warn.setTextColor_(NSColor.systemOrangeColor())
-        self._restart_warn.setLineBreakMode_(NSLineBreakByTruncatingTail)
-        self._restart_warn.setHidden_(True)
+        self._restart_warn.setUsesSingleLineMode_(False)
+        self._restart_warn.setLineBreakMode_(NSLineBreakByWordWrapping)
+        self._restart_warn.setMaximumNumberOfLines_(2)
         root.addSubview_(self._restart_warn)
 
         # ---- bottom bar: Reset (left) · note · Save (right) ----
@@ -686,8 +690,16 @@ class SettingsWindow(NSObject):
 
     @objc.python_method
     def _update_restart_warn(self):
-        if self._restart_warn is not None:
-            self._restart_warn.setHidden_(not (self._dirty and self._restart_pending()))
+        # The banner is always visible (the user wanted a permanent, top-of-window
+        # reminder). We only emphasise it — bold — when the current unsaved edits
+        # would actually trigger a restart on Save. Same text either way, so it can
+        # never re-truncate.
+        if self._restart_warn is None:
+            return
+        active = self._dirty and self._restart_pending()
+        self._restart_warn.setFont_(
+            NSFont.boldSystemFontOfSize_(11) if active else NSFont.systemFontOfSize_(11)
+        )
 
     def markDirty_(self, _sender):  # noqa: N802
         self._recompute_dirty()
