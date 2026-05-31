@@ -71,7 +71,12 @@ class SettingsWindow(NSObject):
             self._preview_speaker = None  # plays a sample when the voice changes
             self._sector_overrides = {}   # sector_key -> {backend, model}; per-prompt model
             self._editing_sector = None   # which prompt's override is currently in the fields
+            self._apply_cb = None         # controller hook to apply cheap settings live
         return self
+
+    @objc.python_method
+    def set_apply_callback(self, cb):
+        self._apply_cb = cb
 
     # -- public ---------------------------------------------------------------
 
@@ -318,7 +323,20 @@ class SettingsWindow(NSObject):
             log.warning("could not write %s: %s", self._path(), exc)
             self._note.setStringValue_(f"⚠️ Не удалось сохранить: {exc}")
             return
-        self._note.setStringValue_("Сохранено. Перезапусти приложение (меню-бар → Выход, затем ./run.sh).")
+        applied = False
+        if self._apply_cb is not None:
+            try:
+                self._apply_cb()
+                applied = True
+            except Exception as exc:  # noqa: BLE001 - never let live-apply break Save
+                log.warning("live-apply failed: %s", exc)
+        if applied:
+            self._note.setStringValue_(
+                "Сохранено и применено: голос, LLM/модели, concurrent. "
+                "Триггеры и STT-модель — после перезапуска."
+            )
+        else:
+            self._note.setStringValue_("Сохранено. Перезапусти приложение (меню-бар → Выход).")
         if backend == "piper":
             self._maybe_download_piper(piper_voice)
 

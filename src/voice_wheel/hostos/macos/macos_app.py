@@ -80,11 +80,30 @@ class VoiceWheel(NSObject):
         self._spinner = ProcessingIndicator()
         self._menubar = MenuBar.alloc().init()
         self._settings_win = SettingsWindow.alloc().init()
+        self._settings_win.set_apply_callback(self._apply_config_live)
         self._menubar.set_handlers(self._on_reuse, self._settings_win.show)
         self._menubar.update_history(self._history.recent())
         self._speaker = self._make_speaker(config)
         self._triggers = TriggerManager(self)
         return self
+
+    @objc.python_method
+    def _apply_config_live(self):
+        """Apply the just-saved settings without a restart — but only the parts that
+        are cheap to rebuild. The LLM client, per-prompt models, the TTS voice and
+        the concurrent toggle are swapped live. Triggers (event tap) and the STT
+        model still need a restart (re-registering the tap / reloading Whisper)."""
+        try:
+            cfg = Config.load()
+        except Exception as exc:  # noqa: BLE001
+            log.warning("live-apply: could not reload config: %s", exc)
+            return
+        self._config = cfg
+        self._concurrent = bool(getattr(cfg, "concurrent", False))
+        self._llm = LLMClient(cfg.llm, cfg.sector_models)
+        self._pipeline = Pipeline(self._stt, self._llm, self._clipboard, cfg)
+        self._speaker = self._make_speaker(cfg)
+        log.info("settings applied live (LLM / per-prompt models / voice / concurrent)")
 
     @objc.python_method
     def _make_speaker(self, config):
