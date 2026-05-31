@@ -158,7 +158,16 @@ OPENAI_MODELS = ["gpt-4o-mini", "gpt-4o"]
 CC_MODELS = ["claude-haiku-4-5", "claude-sonnet-4-5"]
 LANGS = ["auto", "ru", "en"]
 KINDS = ["mouse_side", "keyboard", "mouse"]
-MS_KINDS = ["mouse_side", "mouse"]  # the mouse row's kinds (keyboard has its own row)
+# Friendly mouse-button picker (#mouse-selector): (kind, key, (ru, en)). Index-mapped;
+# a «Поймать» of an unlisted button appends a custom item. Side-button NUMBERS depend
+# on the mouse, so these are common defaults — others are added by capture.
+MOUSE_BUTTONS = [
+    ("mouse", "right", ("Правая кнопка", "Right button")),
+    ("mouse", "middle", ("Средняя кнопка", "Middle button")),
+    ("mouse_side", "3", ("Боковая 3 (назад)", "Side 3 (back)")),
+    ("mouse_side", "4", ("Боковая 4 (вперёд)", "Side 4 (forward)")),
+    ("mouse_side", "5", ("Боковая 5", "Side 5")),
+]
 
 
 def _hotkey_bindings(raw):
@@ -484,10 +493,10 @@ class SettingsWindow(NSObject):
         self._tts_kb = field(w=170)
         self._cap_tts_kb = button("catch", "captureTtsKb:", 100)
         self._tts_kb_on = trig_row("trig_kb", self._tts_kb, self._cap_tts_kb)
-        self._tts_ms_kind = popup(MS_KINDS, w=110)
-        self._tts_ms_key = field(w=70)
-        self._cap_tts_ms = button("catch", "captureTtsMs:", 100)
-        self._tts_ms_on = trig_row("trig_mouse", self._tts_ms_kind, self._tts_ms_key, self._cap_tts_ms)
+        self._tts_ms = popup(self._mouse_labels(), w=200)
+        self._tts_ms_map = [(k, key) for k, key, _ in MOUSE_BUTTONS]
+        self._cap_tts_ms = button("catch", "captureTtsMs:", 90)
+        self._tts_ms_on = trig_row("trig_mouse", self._tts_ms, self._cap_tts_ms)
         hint("trig_check_hint")
 
         # ---- Triggers tab ----
@@ -496,10 +505,10 @@ class SettingsWindow(NSObject):
         self._wheel_kb = field(w=170)
         self._cap_wheel_kb = button("catch", "captureWheelKb:", 100)
         self._wheel_kb_on = trig_row("trig_kb", self._wheel_kb, self._cap_wheel_kb)
-        self._wheel_ms_kind = popup(MS_KINDS, w=110)
-        self._wheel_ms_key = field(w=70)
-        self._cap_wheel_ms = button("catch", "captureWheelMs:", 100)
-        self._wheel_ms_on = trig_row("trig_mouse", self._wheel_ms_kind, self._wheel_ms_key, self._cap_wheel_ms)
+        self._wheel_ms = popup(self._mouse_labels(), w=200)
+        self._wheel_ms_map = [(k, key) for k, key, _ in MOUSE_BUTTONS]
+        self._cap_wheel_ms = button("catch", "captureWheelMs:", 90)
+        self._wheel_ms_on = trig_row("trig_mouse", self._wheel_ms, self._cap_wheel_ms)
         hint("trig_hint")
         hint("trig_check_hint")
         hint("trig_restart")
@@ -556,8 +565,8 @@ class SettingsWindow(NSObject):
             (self._stt_model, "tip_stt_model"), (self._lang, "tip_stt_lang"),
             (self._tts_enabled, "tip_tts_enabled"), (self._tts_voice, "tip_tts_voice"),
             (self._prem, "tip_premium"), (self._tts_kb, "tip_tts_trigger"),
-            (self._tts_ms_key, "tip_tts_trigger"), (self._wheel_kb, "tip_wheel_trigger"),
-            (self._wheel_ms_key, "tip_wheel_trigger"), (self._concurrent, "tip_concurrent"),
+            (self._tts_ms, "tip_mouse_btn"), (self._wheel_kb, "tip_wheel_trigger"),
+            (self._wheel_ms, "tip_mouse_btn"), (self._concurrent, "tip_concurrent"),
             (self._uilang_popup, "tip_uilang"),
             (self._cap_wheel_kb, "tip_catch"), (self._cap_wheel_ms, "tip_catch"),
             (self._cap_tts_kb, "tip_catch"), (self._cap_tts_ms, "tip_catch"),
@@ -573,14 +582,14 @@ class SettingsWindow(NSObject):
     def _wire_dirty(self):
         """Any user edit -> mark dirty (Save turns green). Programmatic value sets
         in _load don't fire these, so loading leaves the form clean."""
-        for p in (self._stt_backend, self._stt_model, self._lang, self._wheel_ms_kind,
-                  self._tts_ms_kind, self._uilang_popup):
+        for p in (self._stt_backend, self._stt_model, self._lang, self._wheel_ms,
+                  self._tts_ms, self._uilang_popup):
             p.setTarget_(self)
             p.setAction_("markDirty:")
         self._concurrent.setTarget_(self)
         self._concurrent.setAction_("markDirty:")
         for f in (self._api_key, self._api_model, self._ollama, self._ollama_url, self._cc_model,
-                  self._wheel_kb, self._wheel_ms_key, self._tts_kb, self._tts_ms_key):
+                  self._wheel_kb, self._tts_kb):
             f.setDelegate_(self)  # controlTextDidChange_ fires per keystroke
 
     @objc.python_method
@@ -602,16 +611,54 @@ class SettingsWindow(NSObject):
 
     # -- trigger rows (keyboard + mouse, both live; #54) ----------------------
 
+    # -- friendly mouse-button picker (index-mapped popup) --------------------
+
     @objc.python_method
-    def _fill_trigger(self, kb_on, kb_field, ms_on, ms_kind, ms_key, raw, default_ms_key):
+    def _mouse_labels(self):
+        idx = 0 if self._uilang == "ru" else 1
+        return [pair[idx] for _k, _key, pair in MOUSE_BUTTONS]
+
+    @objc.python_method
+    def _mouse_custom_label(self, kind, key):
+        return self._t("mouse_custom_side" if kind == "mouse_side" else "mouse_custom_btn").format(key)
+
+    @objc.python_method
+    def _reset_mouse_popup(self, popup, mapping):
+        popup.removeAllItems()
+        popup.addItemsWithTitles_(self._mouse_labels())
+        mapping[:] = [(k, key) for k, key, _ in MOUSE_BUTTONS]
+
+    @objc.python_method
+    def _select_mouse(self, popup, mapping, kind, key):
+        """Select the (kind,key) button; an unlisted one (e.g. a captured side №6)
+        is appended as a custom item so it round-trips."""
+        target = (str(kind), str(key))
+        for i, mk in enumerate(mapping):
+            if mk == target:
+                popup.selectItemAtIndex_(i)
+                return
+        popup.addItemWithTitle_(self._mouse_custom_label(kind, key))
+        mapping.append(target)
+        popup.selectItemAtIndex_(len(mapping) - 1)
+
+    @objc.python_method
+    def _mouse_value(self, popup, mapping):
+        i = int(popup.indexOfSelectedItem())
+        return mapping[i] if 0 <= i < len(mapping) else ("mouse_side", "3")
+
+    # -- trigger rows (keyboard + mouse, both live; #54/#58) ------------------
+
+    @objc.python_method
+    def _fill_trigger(self, kb_on, kb_field, ms_on, ms_popup, ms_map, raw, default_ms_key):
         """Spread a config 'hotkey' (legacy single or a list) across the two rows;
         a present binding ticks that row's on/off checkbox."""
         bindings = _hotkey_bindings(raw)
         kb_field.setStringValue_(""); kb_on.setState_(0)
-        ms_kind.selectItemWithTitle_("mouse_side"); ms_key.setStringValue_(""); ms_on.setState_(0)
+        self._reset_mouse_popup(ms_popup, ms_map)
+        self._select_mouse(ms_popup, ms_map, "mouse_side", default_ms_key)
+        ms_on.setState_(0)
         if not bindings:  # fresh/empty config -> the side-button binding, enabled
             ms_on.setState_(1)
-            ms_key.setStringValue_(default_ms_key)
             return
         for b in bindings:
             kind = str(b.get("kind", ""))
@@ -619,21 +666,19 @@ class SettingsWindow(NSObject):
             if kind == "keyboard":
                 kb_field.setStringValue_(key); kb_on.setState_(1)
             elif kind in ("mouse_side", "mouse"):
-                ms_kind.selectItemWithTitle_(kind); ms_key.setStringValue_(key); ms_on.setState_(1)
+                self._select_mouse(ms_popup, ms_map, kind, key); ms_on.setState_(1)
 
     @objc.python_method
-    def _collect_trigger(self, kb_on, kb_field, ms_on, ms_kind, ms_key):
-        """The two rows -> a list of bindings. A row contributes only if its checkbox
-        is on and its value is non-empty (an off/locked row is skipped)."""
+    def _collect_trigger(self, kb_on, kb_field, ms_on, ms_popup, ms_map):
+        """The two rows -> a list of bindings (an off/locked row is skipped)."""
         out = []
         if bool(kb_on.state()):
             combo = str(kb_field.stringValue()).strip()
             if combo:
                 out.append({"kind": "keyboard", "key": combo})
         if bool(ms_on.state()):
-            mkey = str(ms_key.stringValue()).strip()
-            if mkey:
-                out.append({"kind": str(ms_kind.titleOfSelectedItem()), "key": mkey})
+            kind, key = self._mouse_value(ms_popup, ms_map)
+            out.append({"kind": kind, "key": key})
         return out
 
     @objc.python_method
@@ -691,9 +736,9 @@ class SettingsWindow(NSObject):
         self._stt_model.selectItemWithTitle_(str(stt.get("model", "small")))
         self._lang.selectItemWithTitle_(data.get("language", "ru"))
         self._fill_trigger(self._wheel_kb_on, self._wheel_kb, self._wheel_ms_on,
-                           self._wheel_ms_kind, self._wheel_ms_key, data.get("hotkey"), "3")
+                           self._wheel_ms, self._wheel_ms_map, data.get("hotkey"), "3")
         self._fill_trigger(self._tts_kb_on, self._tts_kb, self._tts_ms_on,
-                           self._tts_ms_kind, self._tts_ms_key, tts.get("hotkey"), "4")
+                           self._tts_ms, self._tts_ms_map, tts.get("hotkey"), "4")
         self._select_voice(tts)
         self._tts_enabled.setState_(1 if tts.get("enabled", True) else 0)
         self._refresh_trigger_states()
@@ -734,7 +779,7 @@ class SettingsWindow(NSObject):
         data["language"] = str(self._lang.titleOfSelectedItem())
         data["hotkey"] = self._collect_trigger(
             self._wheel_kb_on, self._wheel_kb, self._wheel_ms_on,
-            self._wheel_ms_kind, self._wheel_ms_key,
+            self._wheel_ms, self._wheel_ms_map,
         )
         if not data["hotkey"]:  # never let the wheel become un-triggerable (F1)
             self._note.setStringValue_(self._t("note_no_trigger"))
@@ -743,7 +788,7 @@ class SettingsWindow(NSObject):
         data["tts"]["enabled"] = bool(self._tts_enabled.state())
         data["tts"]["hotkey"] = self._collect_trigger(
             self._tts_kb_on, self._tts_kb, self._tts_ms_on,
-            self._tts_ms_kind, self._tts_ms_key,
+            self._tts_ms, self._tts_ms_map,
         )
         backend, piper_voice = self._selected_voice()
         data["tts"]["backend"] = backend
@@ -1090,12 +1135,11 @@ class SettingsWindow(NSObject):
         if ident == "tab_voice":
             return (int(self._tts_enabled.state()), int(self._tts_voice.indexOfSelectedItem()),
                     int(self._tts_kb_on.state()), str(self._tts_kb.stringValue()),
-                    int(self._tts_ms_on.state()), str(self._tts_ms_kind.titleOfSelectedItem()),
-                    str(self._tts_ms_key.stringValue()))
+                    int(self._tts_ms_on.state()), self._mouse_value(self._tts_ms, self._tts_ms_map))
         if ident == "tab_triggers":
             return (int(self._wheel_kb_on.state()), str(self._wheel_kb.stringValue()),
-                    int(self._wheel_ms_on.state()), str(self._wheel_ms_kind.titleOfSelectedItem()),
-                    str(self._wheel_ms_key.stringValue()), int(self._concurrent.state()))
+                    int(self._wheel_ms_on.state()), self._mouse_value(self._wheel_ms, self._wheel_ms_map),
+                    int(self._concurrent.state()))
         if ident == "tab_lang":
             return (int(self._uilang_popup.indexOfSelectedItem()),)
         return ()
@@ -1133,7 +1177,7 @@ class SettingsWindow(NSObject):
         self._tts_enabled.setState_(1 if d.enabled else 0)
         self._select_voice({"backend": d.backend, "piper_voice": d.piper_voice})
         self._fill_trigger(
-            self._tts_kb_on, self._tts_kb, self._tts_ms_on, self._tts_ms_kind, self._tts_ms_key,
+            self._tts_kb_on, self._tts_kb, self._tts_ms_on, self._tts_ms, self._tts_ms_map,
             [{"kind": h.kind, "key": h.key} for h in d.hotkeys], "4",
         )
         self._refresh_trigger_states()
@@ -1143,7 +1187,7 @@ class SettingsWindow(NSObject):
 
         d = HotkeyConfig()
         self._fill_trigger(
-            self._wheel_kb_on, self._wheel_kb, self._wheel_ms_on, self._wheel_ms_kind, self._wheel_ms_key,
+            self._wheel_kb_on, self._wheel_kb, self._wheel_ms_on, self._wheel_ms, self._wheel_ms_map,
             [{"kind": d.kind, "key": d.key}], "3",
         )
         self._concurrent.setState_(0)
@@ -1231,9 +1275,9 @@ class SettingsWindow(NSObject):
         self._prem.setEnabled_(tts_on)
         rows = (
             (self._wheel_kb_on, (self._wheel_kb, self._cap_wheel_kb), True),
-            (self._wheel_ms_on, (self._wheel_ms_kind, self._wheel_ms_key, self._cap_wheel_ms), True),
+            (self._wheel_ms_on, (self._wheel_ms, self._cap_wheel_ms), True),
             (self._tts_kb_on, (self._tts_kb, self._cap_tts_kb), tts_on),
-            (self._tts_ms_on, (self._tts_ms_kind, self._tts_ms_key, self._cap_tts_ms), tts_on),
+            (self._tts_ms_on, (self._tts_ms, self._cap_tts_ms), tts_on),
         )
         for cb, controls, gate in rows:
             cb.setEnabled_(gate)
@@ -1255,23 +1299,26 @@ class SettingsWindow(NSObject):
     # means the keyboard «Поймать» ignores mouse clicks and vice-versa.
 
     def captureWheelKb_(self, _sender):  # noqa: N802
-        self._begin_capture(None, self._wheel_kb, _sender, "keyboard")
+        self._begin_capture(_sender, "keyboard",
+                            lambda k, key: self._wheel_kb.setStringValue_(key))
 
     def captureWheelMs_(self, _sender):  # noqa: N802
-        self._begin_capture(self._wheel_ms_kind, self._wheel_ms_key, _sender, "mouse")
+        self._begin_capture(_sender, "mouse",
+                            lambda k, key: self._select_mouse(self._wheel_ms, self._wheel_ms_map, k, key))
 
     def captureTtsKb_(self, _sender):  # noqa: N802
-        self._begin_capture(None, self._tts_kb, _sender, "keyboard")
+        self._begin_capture(_sender, "keyboard",
+                            lambda k, key: self._tts_kb.setStringValue_(key))
 
     def captureTtsMs_(self, _sender):  # noqa: N802
-        self._begin_capture(self._tts_ms_kind, self._tts_ms_key, _sender, "mouse")
+        self._begin_capture(_sender, "mouse",
+                            lambda k, key: self._select_mouse(self._tts_ms, self._tts_ms_map, k, key))
 
     @objc.python_method
-    def _begin_capture(self, kind_popup, key_field, button, accept):
+    def _begin_capture(self, button, accept, write):
         """Catch the next key/combo (accept='keyboard') or mouse button
-        (accept='mouse') and write it into the row. kind_popup is None for the
-        keyboard row (no kind dropdown). (A side button already bound to a trigger
-        is swallowed by our event tap — press Esc to cancel and type it instead.)"""
+        (accept='mouse') and hand (kind, key) to ``write``. (A side button already
+        bound to a trigger is swallowed by our event tap — press Esc to cancel.)"""
         if self._capture_monitor is not None:
             return  # already catching
         old_title = str(button.title())
@@ -1289,9 +1336,7 @@ class SettingsWindow(NSObject):
             if kind is None:
                 return None  # unrecognized — keep waiting
             if kind != "cancel" and kind in wanted:
-                if kind_popup is not None:
-                    kind_popup.selectItemWithTitle_(kind)
-                key_field.setStringValue_(key)
+                write(kind, key)
                 self._note.setStringValue_(self._t("note_capture_caught").format(kind, key))
                 self._set_dirty(True)
             elif kind != "cancel":

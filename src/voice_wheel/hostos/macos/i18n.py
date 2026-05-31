@@ -135,6 +135,12 @@ STR = {
         "Галочка — включить/выключить этот вид триггера.",
         "Checkbox — enable/disable this trigger type.",
     ),
+    "tip_mouse_btn": (
+        "Кнопка мыши для триггера. «Поймать» → нажми реальную кнопку, и мы её определим.",
+        "The mouse button for the trigger. «Catch» → press the real button and we'll detect it.",
+    ),
+    "mouse_custom_side": ("Боковая {}", "Side button {}"),
+    "mouse_custom_btn": ("Кнопка мыши {}", "Mouse button {}"),
     "trig_restart": (
         "⏱ Смена триггера применится сразу: при «Сохранить» приложение перезапустится.",
         "⏱ A trigger change applies right away: the app restarts on «Save».",
