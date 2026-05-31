@@ -166,28 +166,32 @@ class SettingsWindow(NSObject):
         self._lang = popup(LANGS)
         gap()
 
+        header("⌨️ Триггер записи (колесо)")
+        rowlabel("Кнопка")
+        self._wheel_kind = popup(KINDS, x=200, w=140)
+        self._wheel_key = field(x=350, w=120)
+        hint("вид + кнопка/клавиша: mouse_side + 3, либо keyboard + f8, либо mouse + left.")
+        gap()
+
         header("🔊 Голос (озвучка)")
+        # The checkbox sits ABOVE its settings and disables them when off.
+        self._tts_enabled = checkbox("Озвучка включена")
+        self._tts_enabled.setTarget_(self)
+        self._tts_enabled.setAction_("ttsEnabledChanged:")
+        gap(30)
         rowlabel("Голос")
         self._tts_voice = popup([v[0] for v in TTS_VOICES])
         gap()
-        prem = NSButton.buttonWithTitle_target_action_(
+        self._prem = NSButton.buttonWithTitle_target_action_(
             "macOS: скачать премиум-голоса…", self, "downloadPremium:"
         )
-        prem.setFrame_(NSMakeRect(200, cur[0] - 2, 270, 24))
-        content.addSubview_(prem)
+        self._prem.setFrame_(NSMakeRect(200, cur[0] - 2, 270, 24))
+        content.addSubview_(self._prem)
         gap(32)
-        self._tts_enabled = checkbox("Озвучка включена")
-        gap(30)
-
-        header("⌨️ Триггеры")
-        rowlabel("Колесо записи")
-        self._wheel_kind = popup(KINDS, x=200, w=140)
-        self._wheel_key = field(x=350, w=120)
-        gap()
-        rowlabel("Озвучка")
+        rowlabel("Кнопка озвучки")
         self._tts_kind = popup(KINDS, x=200, w=140)
         self._tts_key = field(x=350, w=120)
-        hint("вид + кнопка/клавиша: mouse_side + 3 или 4, либо keyboard + f8, либо mouse + left.")
+        hint("вид + кнопка/клавиша: mouse_side + 4, либо keyboard + f9, либо mouse + middle.")
         gap()
 
         header("⚙️ Прочее")
@@ -241,6 +245,7 @@ class SettingsWindow(NSObject):
         self._tts_key.setStringValue_(str(tts_hk.get("key", "4")))
         self._tts_voice.selectItemWithTitle_(self._voice_label(tts))
         self._tts_enabled.setState_(1 if tts.get("enabled", True) else 0)
+        self._apply_tts_enabled()
         self._concurrent.setState_(1 if data.get("concurrent", False) else 0)
         self._note.setStringValue_("")
 
@@ -308,6 +313,16 @@ class SettingsWindow(NSObject):
 
     def llmBackendChanged_(self, _sender):  # noqa: N802
         self._apply_llm_visibility(self._llm_value(str(self._backend.titleOfSelectedItem())))
+
+    @objc.python_method
+    def _apply_tts_enabled(self):
+        """Disable the voice + read-aloud-button controls when TTS is off."""
+        on = bool(self._tts_enabled.state())
+        for ctl in (self._tts_voice, self._prem, self._tts_kind, self._tts_key):
+            ctl.setEnabled_(on)
+
+    def ttsEnabledChanged_(self, _sender):  # noqa: N802
+        self._apply_tts_enabled()
 
     # -- TTS voice helpers ----------------------------------------------------
 
