@@ -457,6 +457,7 @@ class VoiceWheel(NSObject):
             f"sys.path.insert(0, {src!r}); "
             "runpy.run_module('voice_wheel', run_name='__main__')"
         )
+        os.environ["VW_RESTARTED"] = "1"  # the restarted run won't re-prompt for access
         try:
             os.execv(sys.executable, [sys.executable, "-c", code])
         except OSError as exc:  # last-ditch: a clean exit lets the run.sh supervisor relaunch
@@ -467,16 +468,24 @@ class VoiceWheel(NSObject):
         self._cleanup()
 
 
-def _ensure_accessibility() -> bool:
-    """Prompt to add this binary to Accessibility (needed for the global hotkey)."""
+def _ensure_accessibility(allow_prompt: bool = True) -> bool:
+    """Check Accessibility trust (needed for the global hotkey). Show the grant
+    prompt only if it's actually missing AND ``allow_prompt``.
+
+    We check silently first (prompt=False) so an already-granted process never
+    re-asks, and we pass allow_prompt=False right after an in-place restart, where
+    TCC can briefly report 'not trusted' even though the grant is in place — that
+    was making the app re-request access that the user had already given."""
     try:
         from ApplicationServices import (
             AXIsProcessTrustedWithOptions,
             kAXTrustedCheckOptionPrompt,
         )
 
-        trusted = AXIsProcessTrustedWithOptions({kAXTrustedCheckOptionPrompt: True})
-        if not trusted:
+        if AXIsProcessTrustedWithOptions({kAXTrustedCheckOptionPrompt: False}):
+            return True  # already trusted -> never prompt
+        if allow_prompt:
+            AXIsProcessTrustedWithOptions({kAXTrustedCheckOptionPrompt: True})  # show the prompt
             print(
                 "⚠️  Нет доступа Accessibility — триггер ловиться не будет.\n"
                 "   1) В появившемся диалоге нажми «Открыть настройки».\n"
@@ -484,7 +493,7 @@ def _ensure_accessibility() -> bool:
                 "   3) Перезапусти приложение.",
                 flush=True,
             )
-        return bool(trusted)
+        return False
     except Exception as exc:  # noqa: BLE001
         log.warning("accessibility check failed: %s", exc)
         return True
@@ -510,7 +519,9 @@ def main() -> None:
     _load_dotenv()
     app = NSApplication.sharedApplication()
     app.setActivationPolicy_(NSApplicationActivationPolicyAccessory)
-    _ensure_accessibility()
+    # Don't re-ask for Accessibility on a self-restart — it was already granted.
+    restarted = os.environ.pop("VW_RESTARTED", None) == "1"
+    _ensure_accessibility(allow_prompt=not restarted)
     config = Config.load()
     controller = VoiceWheel.alloc().initWithConfig_(config)
     app.setDelegate_(controller)            # applicationWillTerminate_ -> cleanup (menu Quit)
