@@ -24,6 +24,12 @@ from AppKit import (
     NSBackingStoreBuffered,
     NSButton,
     NSColor,
+    NSEvent,
+    NSEventMaskKeyDown,
+    NSEventModifierFlagCommand,
+    NSEventModifierFlagControl,
+    NSEventModifierFlagOption,
+    NSEventModifierFlagShift,
     NSFont,
     NSPopUpButton,
     NSTextField,
@@ -39,6 +45,36 @@ from ...core.modes import sectors
 log = logging.getLogger(__name__)
 
 BASE_MODEL_LABEL = "(как базовая)"  # per-prompt override = "no override, use the default LLM"
+
+# macOS keyCodes -> pynput-compatible names for keys that aren't plain characters.
+_KEYCODE_NAMES = {
+    122: "f1", 120: "f2", 99: "f3", 118: "f4", 96: "f5", 97: "f6",
+    98: "f7", 100: "f8", 101: "f9", 109: "f10", 103: "f11", 111: "f12",
+    49: "space", 36: "enter", 53: "esc", 48: "tab", 51: "backspace",
+    123: "left", 124: "right", 125: "down", 126: "up",
+}
+
+
+def _format_combo(event) -> str | None:
+    """An NSKeyDown event -> a config key string like 'cmd+f', 'shift+f8', 'space'."""
+    flags = event.modifierFlags()
+    mods = []
+    if flags & NSEventModifierFlagCommand:
+        mods.append("cmd")
+    if flags & NSEventModifierFlagControl:
+        mods.append("ctrl")
+    if flags & NSEventModifierFlagOption:
+        mods.append("alt")
+    if flags & NSEventModifierFlagShift:
+        mods.append("shift")
+    main = _KEYCODE_NAMES.get(int(event.keyCode()))
+    if main is None:
+        chars = str(event.charactersIgnoringModifiers() or "").lower().strip()
+        if len(chars) == 1 and chars.isprintable():
+            main = chars
+    if not main:
+        return None
+    return "+".join([*mods, main])
 
 # (human label, config value) — the LLM backend picker shows the label, stores the value.
 LLM_BACKENDS = [
@@ -72,6 +108,7 @@ class SettingsWindow(NSObject):
             self._sector_overrides = {}   # sector_key -> {backend, model}; per-prompt model
             self._editing_sector = None   # which prompt's override is currently in the fields
             self._apply_cb = None         # controller hook to apply cheap settings live
+            self._capture_monitor = None  # active NSEvent monitor while catching a key
         return self
 
     @objc.python_method
@@ -179,9 +216,12 @@ class SettingsWindow(NSObject):
 
         header("⌨️ Триггер записи (колесо)")
         rowlabel("Кнопка")
-        self._wheel_kind = popup(KINDS, x=200, w=140)
-        self._wheel_key = field(x=350, w=120)
-        hint("вид + кнопка/клавиша: mouse_side + 3, либо keyboard + f8, либо mouse + left.")
+        self._wheel_kind = popup(KINDS, x=195, w=100)
+        self._wheel_key = field(x=300, w=80)
+        cap_w = NSButton.buttonWithTitle_target_action_("Поймать", self, "captureWheel:")
+        cap_w.setFrame_(NSMakeRect(386, cur[0] - 2, 95, 24))
+        content.addSubview_(cap_w)
+        hint("вид + кнопка/клавиша, или «Поймать» → нажми нужную (комбо вроде ⌘F тоже).")
         gap()
 
         header("🔊 Голос (озвучка)")
@@ -202,9 +242,12 @@ class SettingsWindow(NSObject):
         content.addSubview_(self._prem)
         gap(32)
         rowlabel("Кнопка озвучки")
-        self._tts_kind = popup(KINDS, x=200, w=140)
-        self._tts_key = field(x=350, w=120)
-        hint("вид + кнопка/клавиша: mouse_side + 4, либо keyboard + f9, либо mouse + middle.")
+        self._tts_kind = popup(KINDS, x=195, w=100)
+        self._tts_key = field(x=300, w=80)
+        cap_t = NSButton.buttonWithTitle_target_action_("Поймать", self, "captureTts:")
+        cap_t.setFrame_(NSMakeRect(386, cur[0] - 2, 95, 24))
+        content.addSubview_(cap_t)
+        hint("вид + кнопка/клавиша, или «Поймать» → нажми нужную.")
         gap()
 
         header("🎛 Модель на промпт (опц.)")
@@ -416,6 +459,38 @@ class SettingsWindow(NSObject):
     def ttsEnabledChanged_(self, _sender):  # noqa: N802
         self._apply_tts_enabled()
 
+    # -- key capture ("Поймать") ---------------------------------------------
+
+    def captureWheel_(self, _sender):  # noqa: N802
+        self._begin_capture(self._wheel_kind, self._wheel_key, _sender)
+
+    def captureTts_(self, _sender):  # noqa: N802
+        self._begin_capture(self._tts_kind, self._tts_key, _sender)
+
+    @objc.python_method
+    def _begin_capture(self, kind_popup, key_field, button):
+        """Catch the next keystroke and write it into the trigger fields."""
+        if self._capture_monitor is not None:
+            return  # already catching
+        old_title = str(button.title())
+        button.setTitle_("нажми…")
+
+        def handler(event):
+            combo = _format_combo(event)
+            if combo:
+                kind_popup.selectItemWithTitle_("keyboard")
+                key_field.setStringValue_(combo)
+                self._note.setStringValue_(f"Поймал: {combo}. Нажми «Сохранить».")
+            if self._capture_monitor is not None:
+                NSEvent.removeMonitor_(self._capture_monitor)
+                self._capture_monitor = None
+            button.setTitle_(old_title)
+            return None  # swallow the keystroke so it doesn't type into a field
+
+        self._capture_monitor = NSEvent.addLocalMonitorForEventsMatchingMask_handler_(
+            NSEventMaskKeyDown, handler
+        )
+
     def ttsVoiceChanged_(self, _sender):  # noqa: N802
         self._preview_voice()
 
@@ -502,6 +577,9 @@ class SettingsWindow(NSObject):
         )
 
     def windowWillClose_(self, _notif):  # noqa: N802
+        if self._capture_monitor is not None:
+            NSEvent.removeMonitor_(self._capture_monitor)
+            self._capture_monitor = None
         NSApplication.sharedApplication().setActivationPolicy_(
             NSApplicationActivationPolicyAccessory
         )

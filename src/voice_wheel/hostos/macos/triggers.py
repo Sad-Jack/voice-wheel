@@ -37,7 +37,7 @@ class TriggerManager:
         (e.g. Accessibility not granted yet) — the app stays alive regardless.
         """
         side: dict = {}
-        kb: dict = {}
+        kb: list = []   # (mod_names, main_key, press_sel, release_sel) — supports combos
         ms: dict = {}
         for hk, p_sel, r_sel in triggers:
             if hk.kind == "mouse_side":
@@ -48,7 +48,9 @@ class TriggerManager:
                     "release": (lambda s=r_sel: self._fire(s)) if r_sel else None,
                 }
             elif hk.kind == "keyboard":
-                kb[_parse_key(hk.key)] = {"press": p_sel, "release": r_sel}
+                mods, main = _parse_combo(hk.key)
+                if main is not None:
+                    kb.append((mods, main, p_sel, r_sel))
             elif hk.kind == "mouse":
                 ms[_parse_button(hk.key)] = {"press": p_sel, "release": r_sel}
 
@@ -72,21 +74,37 @@ class TriggerManager:
 
     def _start_pynput(self, kb, ms):  # noqa: ANN001
         if kb:
-            held = set()
+            held_mods: set = set()  # modifier names currently down
+            active: set = set()     # indices of triggers currently firing (held)
 
             def on_press(key):
-                h = kb.get(key)
-                if h and key not in held:
-                    held.add(key)
-                    if h["press"]:
-                        self._fire(h["press"])
+                m = _mod_name(key)
+                if m:
+                    held_mods.add(m)
+                    return
+                for i, (mods, main, p_sel, _r) in enumerate(kb):
+                    if key == main and mods <= held_mods and i not in active:
+                        active.add(i)
+                        if p_sel:
+                            self._fire(p_sel)
 
             def on_release(key):
-                h = kb.get(key)
-                if h and key in held:
-                    held.discard(key)
-                    if h["release"]:
-                        self._fire(h["release"])
+                m = _mod_name(key)
+                if m:
+                    held_mods.discard(m)
+                    for i in list(active):  # releasing a required modifier ends the hold
+                        mods, _main, _p, r_sel = kb[i]
+                        if m in mods:
+                            active.discard(i)
+                            if r_sel:
+                                self._fire(r_sel)
+                    return
+                for i in list(active):
+                    _mods, main, _p, r_sel = kb[i]
+                    if key == main:
+                        active.discard(i)
+                        if r_sel:
+                            self._fire(r_sel)
 
             self._kb_listener = keyboard.Listener(on_press=on_press, on_release=on_release)
             self._kb_listener.start()
@@ -103,6 +121,34 @@ class TriggerManager:
 
             self._ms_listener = mouse.Listener(on_click=on_click)
             self._ms_listener.start()
+
+
+MODS = ("cmd", "ctrl", "alt", "shift")
+
+
+def _mod_name(key):  # noqa: ANN001
+    """A pynput modifier key -> canonical name ('cmd'/'ctrl'/'alt'/'shift'), else None."""
+    name = getattr(key, "name", "") or ""  # KeyCode (char keys) has no .name
+    for m in MODS:
+        if name.startswith(m):
+            return m
+    if name.startswith("alt"):  # alt_gr
+        return "alt"
+    return None
+
+
+def _parse_combo(spec: str):
+    """'cmd+f' -> ({'cmd'}, KeyCode 'f'); 'f8' -> (set(), Key.f8). main is None if unknown."""
+    parts = [p.strip().lower() for p in str(spec).split("+") if p.strip()]
+    mods = {p for p in parts if p in MODS}
+    mains = [p for p in parts if p not in MODS]
+    if not mains:
+        return mods, None
+    try:
+        return mods, _parse_key(mains[-1])
+    except ValueError:
+        log.warning("unrecognized keyboard trigger: %r", spec)
+        return mods, None
 
 
 def _parse_key(name: str):
