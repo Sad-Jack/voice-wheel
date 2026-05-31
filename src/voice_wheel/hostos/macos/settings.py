@@ -205,6 +205,15 @@ TTS_VOICES = [
     ("piper", "ru_RU-ruslan-medium", ("Piper: Руслан — нейро (RU, муж.)", "Piper: Ruslan — neural (RU, male)")),
     ("piper", "ru_RU-dmitri-medium", ("Piper: Дмитрий — нейро (RU, муж.)", "Piper: Dmitri — neural (RU, male)")),
 ]
+# Suggested keyboard combos, pre-filled into the keyboard trigger rows but left
+# OFF by default — the user ticks the row to enable (the active default trigger
+# stays the side mouse button). Chosen for a hold-to-record key: left-hand
+# reachable so the right hand stays free for the trackpad, emit no text, and
+# don't clash with macOS shortcuts. ⌘ keeps the char stable for pynput's matching
+# and ⌃ suppresses text; ⌃⌘Z / ⌃⌘X aren't standard system shortcuts.
+WHEEL_KB_DEFAULT = "cmd+ctrl+z"  # ⌃⌘Z — запись/колесо
+TTS_KB_DEFAULT = "cmd+ctrl+x"    # ⌃⌘X — озвучка
+
 W = 520
 H = 464  # +24 over the original 440 for the top restart banner (the old bottom
          # banner gap was reclaimed, so the window grew less than the banner's height)
@@ -724,11 +733,17 @@ class SettingsWindow(NSObject):
     # -- trigger rows (keyboard + mouse, both live; #54/#58) ------------------
 
     @objc.python_method
-    def _fill_trigger(self, kb_on, kb_field, ms_on, ms_popup, ms_map, raw, default_ms_key):
+    def _fill_trigger(self, kb_on, kb_field, ms_on, ms_popup, ms_map, raw, default_ms_key,
+                      default_kb_key=""):
         """Spread a config 'hotkey' (legacy single or a list) across the two rows;
-        a present binding ticks that row's on/off checkbox."""
+        a present binding ticks that row's on/off checkbox.
+
+        ``default_kb_key`` is a *suggested* keyboard combo shown in the keyboard row
+        when the config has no keyboard binding — pre-filled but left OFF (the row's
+        checkbox stays unticked, so it isn't saved/active until the user enables it).
+        A real keyboard binding in the config overrides the suggestion and ticks it."""
         bindings = _hotkey_bindings(raw)
-        kb_field.setStringValue_(""); kb_on.setState_(0)
+        kb_field.setStringValue_(default_kb_key); kb_on.setState_(0)
         self._reset_mouse_popup(ms_popup, ms_map)
         self._select_mouse(ms_popup, ms_map, "mouse_side", default_ms_key)
         ms_on.setState_(0)
@@ -820,9 +835,11 @@ class SettingsWindow(NSObject):
         self._stt_model.selectItemWithTitle_(str(stt.get("model", "small")))
         self._lang.selectItemWithTitle_(data.get("language", "ru"))
         self._fill_trigger(self._wheel_kb_on, self._wheel_kb, self._wheel_ms_on,
-                           self._wheel_ms, self._wheel_ms_map, data.get("hotkey"), "3")
+                           self._wheel_ms, self._wheel_ms_map, data.get("hotkey"), "3",
+                           WHEEL_KB_DEFAULT)
         self._fill_trigger(self._tts_kb_on, self._tts_kb, self._tts_ms_on,
-                           self._tts_ms, self._tts_ms_map, tts.get("hotkey"), "4")
+                           self._tts_ms, self._tts_ms_map, tts.get("hotkey"), "4",
+                           TTS_KB_DEFAULT)
         self._select_voice(tts)
         self._tts_enabled.setState_(1 if tts.get("enabled", True) else 0)
         self._refresh_trigger_states()
@@ -1256,7 +1273,7 @@ class SettingsWindow(NSObject):
         self._select_voice({"backend": d.backend, "piper_voice": d.piper_voice})
         self._fill_trigger(
             self._tts_kb_on, self._tts_kb, self._tts_ms_on, self._tts_ms, self._tts_ms_map,
-            [{"kind": h.kind, "key": h.key} for h in d.hotkeys], "4",
+            [{"kind": h.kind, "key": h.key} for h in d.hotkeys], "4", TTS_KB_DEFAULT,
         )
         self._refresh_trigger_states()
 
@@ -1266,7 +1283,7 @@ class SettingsWindow(NSObject):
         d = HotkeyConfig()
         self._fill_trigger(
             self._wheel_kb_on, self._wheel_kb, self._wheel_ms_on, self._wheel_ms, self._wheel_ms_map,
-            [{"kind": d.kind, "key": d.key}], "3",
+            [{"kind": d.kind, "key": d.key}], "3", WHEEL_KB_DEFAULT,
         )
         self._concurrent.setState_(0)
         self._refresh_trigger_states()
