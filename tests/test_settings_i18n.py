@@ -50,7 +50,7 @@ def test_resolve_lang_passthrough_and_detect():
 
 def test_menu_and_runtime_keys_present():
     for key in ("menu_history", "menu_settings", "menu_quit", "menu_empty",
-                "ready_msg", "lang_restart_warn", "reset_tab", "save"):
+                "ready_msg", "restart_warn_global", "reset_tab", "save"):
         assert key in STR
     assert t("menu_quit", "ru") == "Выход"
     assert t("menu_quit", "en") == "Quit"

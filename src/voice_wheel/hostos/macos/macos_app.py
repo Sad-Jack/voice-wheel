@@ -500,18 +500,12 @@ def _ensure_accessibility(allow_prompt: bool = True) -> bool:
 
 
 def _load_dotenv() -> None:
-    """Load KEY=VALUE lines from a project-root .env (gitignored) into the env."""
-    from ...core.config import _project_root
+    """Load KEY=VALUE lines from a project-root .env (gitignored) into the env
+    (setdefault — a real env var wins over the file)."""
+    from ...core.config import _project_root, read_env
 
-    env_file = _project_root() / ".env"
-    if not env_file.exists():
-        return
-    for line in env_file.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        os.environ.setdefault(key.strip(), value.strip().strip("\"'"))
+    for key, value in read_env(_project_root() / ".env").items():
+        os.environ.setdefault(key, value)
 
 
 def main() -> None:

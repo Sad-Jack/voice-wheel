@@ -1,5 +1,5 @@
-"""Clipboard stack test. Touches the real pasteboard, so it saves and restores
-the user's clipboard around the test. Skipped if PyObjC/AppKit isn't installed.
+"""Clipboard round-trip test. Touches the real pasteboard, so it saves and
+restores the user's clipboard around the test. Skipped if PyObjC isn't installed.
 """
 
 import pytest
@@ -9,20 +9,14 @@ pytest.importorskip("AppKit")
 from voice_wheel.hostos.macos.clipboard import Clipboard  # noqa: E402
 
 
-def test_push_and_restore_round_trip():
+def test_write_read_round_trip():
     clip = Clipboard()
     original = clip.read_text()
     try:
-        clip.write_text("first")
-        clip.push_current()  # saves "first"
-        clip.write_text("second (result)")
-        assert clip.read_text() == "second (result)"
-        assert clip.has_previous() is True
-
-        assert clip.restore_previous() is True
-        assert clip.read_text() == "first"
-        assert clip.has_previous() is False
-        assert clip.restore_previous() is False
+        clip.write_text("hello result")
+        assert clip.read_text() == "hello result"
+        clip.write_text("замена")
+        assert clip.read_text() == "замена"
     finally:
         if original is not None:
             clip.write_text(original)

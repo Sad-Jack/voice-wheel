@@ -23,6 +23,51 @@ def app_support_dir() -> Path:
     return d
 
 
+def read_env(path: Path) -> dict[str, str]:
+    """Parse KEY=VALUE lines from a .env-style file into a dict (skips blanks/comments).
+    Best-effort: a missing/unreadable file yields {}."""
+    out: dict[str, str] = {}
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except (FileNotFoundError, OSError):
+        return out
+    for line in lines:
+        s = line.strip()
+        if not s or s.startswith("#") or "=" not in s:
+            continue
+        k, v = s.split("=", 1)
+        out[k.strip()] = v.strip().strip("\"'")
+    return out
+
+
+def write_env_key(path: Path, var: str, value: str) -> None:
+    """Update/append ``var=value`` in the .env file (preserving other lines; an empty
+    value removes it), and reflect it into ``os.environ`` so a live-rebuilt client
+    picks it up at once. Raises OSError if the file can't be written."""
+    import os
+
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except (FileNotFoundError, OSError):
+        lines = []
+    out, found = [], False
+    for line in lines:
+        s = line.strip()
+        if s and not s.startswith("#") and "=" in s and s.split("=", 1)[0].strip() == var:
+            found = True
+            if value:
+                out.append(f"{var}={value}")
+        else:
+            out.append(line)
+    if value and not found:
+        out.append(f"{var}={value}")
+    path.write_text("\n".join(out) + ("\n" if out else ""), encoding="utf-8")
+    if value:
+        os.environ[var] = value
+    else:
+        os.environ.pop(var, None)
+
+
 @dataclass(frozen=True)
 class HotkeyConfig:
     # Default to a side mouse button: macOS reserves the media keys (F7–F9), so a
@@ -126,9 +171,9 @@ def _parse_tts(section: Any) -> TTSConfig:
         return TTSConfig()
     return TTSConfig(
         enabled=bool(section.get("enabled", True)),
-        backend=str(section.get("backend", "system")),
-        voice=str(section.get("voice", "")),
-        piper_voice=str(section.get("piper_voice", "ru_RU-irina-medium")),
+        backend=str(section.get("backend", TTSConfig.backend)),  # single source of truth
+        voice=str(section.get("voice", TTSConfig.voice)),
+        piper_voice=str(section.get("piper_voice", TTSConfig.piper_voice)),
         hotkeys=_parse_hotkeys(section.get("hotkey"), [HotkeyConfig(kind="mouse_side", key="4")]),
     )
 
