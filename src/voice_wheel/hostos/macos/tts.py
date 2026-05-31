@@ -40,6 +40,11 @@ class Speaker:
         self._synth.speakUtterance_(utt)
         return "speaking"
 
+    def stop(self) -> None:
+        """Main-thread only. Stop any ongoing speech and free the audio device."""
+        if self._synth.isSpeaking():
+            self._synth.stopSpeakingAtBoundary_(_AV_BOUNDARY_IMMEDIATE)
+
     @staticmethod
     def _detect(text: str):
         try:

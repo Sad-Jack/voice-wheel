@@ -58,6 +58,7 @@ class VoiceWheel(NSObject):
         self._config = config
         self._concurrent = bool(getattr(config, "concurrent", False))
         self._recording = False
+        self._triggers_ok = False    # green icon only once the trigger is actually live
         self._tick_timer = None
         # All cross-thread state (cycle id, inflight count, result queue) lives here.
         self._jobs = JobTracker()
@@ -78,25 +79,35 @@ class VoiceWheel(NSObject):
         self._spinner = ProcessingIndicator()
         self._menubar = MenuBar.alloc().init()
         self._settings_win = SettingsWindow.alloc().init()
-        self._menubar.set_handlers(self._on_reuse, self._on_restore, self._settings_win.show)
+        self._menubar.set_handlers(self._on_reuse, self._settings_win.show)
         self._menubar.update_history(self._history.recent())
-        try:
-            self._speaker = Speaker(config.tts.voice)
-        except Exception as exc:  # noqa: BLE001
-            log.warning("TTS unavailable: %s", exc)
-            self._speaker = None
+        self._speaker = self._make_speaker(config)
         self._triggers = TriggerManager(self)
         return self
+
+    @objc.python_method
+    def _make_speaker(self, config):
+        """Pick the TTS backend: 'piper' (local neural) or 'system' (macOS voices)."""
+        try:
+            if config.tts.backend == "piper":
+                from ...core.piper_tts import PiperSpeaker
+
+                return PiperSpeaker(config.tts.piper_voice, app_support_dir() / "piper")
+            return Speaker(config.tts.voice)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("TTS unavailable: %s", exc)
+            return None
 
     # -- lifecycle ------------------------------------------------------------
 
     def start(self):
-        self._menubar.setStatus_("Voice Wheel — прогрев…")
+        self._menubar.set_ready(False)  # red until warm-up completes and the trigger is up
         triggers = [(self._config.hotkey, "onPress:", "onRelease:")]
         if self._config.tts.enabled and self._speaker is not None:
             triggers.append((self._config.tts.hotkey, "onTts:", None))
-        if not self._triggers.start(triggers):
-            self._menubar.setStatus_("⚠️ Нет доступа: Accessibility")
+        self._triggers_ok = self._triggers.start(triggers)
+        if not self._triggers_ok:
+            print("⚠️  Нет доступа Accessibility — триггер не сработает (см. выше).", flush=True)
         threading.Thread(target=self._warm_up, daemon=True).start()
         print(
             f"Voice Wheel готов. Зажми {self._config.hotkey.kind}:{self._config.hotkey.key}, "
@@ -114,33 +125,19 @@ class VoiceWheel(NSObject):
         self.performSelectorOnMainThread_withObject_waitUntilDone_("warmReady:", None, False)
 
     def warmReady_(self, _sender):  # noqa: N802
-        self._menubar.setStatus_("Voice Wheel — готов")
+        self._menubar.set_ready(self._triggers_ok)  # green only if the trigger is live too
 
     def onTts_(self, _sender):  # noqa: N802
         if self._speaker is None:
             return
         state = self._speaker.toggle(self._clipboard.read_text())
-        if state == "speaking":
-            self._menubar.setStatus_("🔊 озвучка буфера…")
-        elif state == "stopped":
-            self._menubar.setStatus_("Voice Wheel — готов")
-        else:
-            self._menubar.setStatus_("буфер пуст")
         print(f"TTS: {state}", flush=True)
 
     @objc.python_method
     def _on_reuse(self, text):
         """Re-copy a past result from the History submenu."""
-        self._clipboard.push_current()
         self._clipboard.write_text(text)
-        self._menubar.set_restore_enabled(self._clipboard.has_previous())
-        self._menubar.setStatus_("Voice Wheel — скопировано из истории")
-
-    @objc.python_method
-    def _on_restore(self):
-        if self._clipboard.restore_previous():
-            self._menubar.set_restore_enabled(self._clipboard.has_previous())
-            self._menubar.setStatus_("Voice Wheel — буфер восстановлен")
+        print("✅ скопировано из истории", flush=True)
 
     # -- main-thread slots ----------------------------------------------------
 
@@ -153,6 +150,12 @@ class VoiceWheel(NSObject):
             self._tick_timer = None
         if self._recorder.is_recording:
             self._recorder.stop()
+        # Stop any clipboard read-aloud first: recording while TTS holds the audio
+        # device used to stall mic startup on the main thread, leaving the wheel
+        # frozen (visible but not tracking the cursor). Freeing the device avoids
+        # that — and you don't want it reading aloud while you dictate anyway.
+        if self._speaker is not None:
+            self._speaker.stop()
         self._wheel.hide()
         if not self._concurrent:
             self._spinner.stop()
@@ -160,14 +163,18 @@ class VoiceWheel(NSObject):
         self._jobs.bump_generation()
         self._recording = True
         loc = NSEvent.mouseLocation()  # bottom-left origin (for the panel)
+        # Bring up the wheel AND start cursor tracking before touching audio, so the
+        # UI is responsive immediately and never depends on mic startup succeeding.
         self._wheel.show_at(loc.x, loc.y)
-        self._recorder.start()
-        self._llm.prewarm()  # boot the LLM now so it hides behind recording time
-        self._menubar.setStatus_("● запись…")
-        print("● запись… (двигай мышь к сектору, отпусти для обработки)", flush=True)
         self._tick_timer = NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
             1.0 / 60.0, self, "onTick:", None, True
         )
+        print("● запись… (двигай мышь к сектору, отпусти для обработки)", flush=True)
+        try:
+            self._recorder.start()
+        except Exception as exc:  # noqa: BLE001 - mic busy/unavailable must not freeze the UI
+            log.warning("recorder start failed: %s", exc)
+        self._llm.prewarm()  # boot the LLM now so it hides behind recording time
 
     def onTick_(self, _timer):  # noqa: N802
         m = NSEvent.mouseLocation()
@@ -189,19 +196,16 @@ class VoiceWheel(NSObject):
         if ring == "cancel":
             # Cursor left the wheel — discard everything, process nothing.
             self._llm.discard_prewarm()
-            self._menubar.setStatus_("Voice Wheel — отменено")
             print("✕ отменено (курсор за колесом)", flush=True)
             return
         if raw.size < MIN_RECORDING_SEC * self._recorder.sample_rate:
             # An accidental tap (press+release with no real speech) — skip quietly
             # instead of spinning up STT and flashing a scary red "empty" ping.
             self._llm.discard_prewarm()
-            self._menubar.setStatus_("Voice Wheel — слишком коротко")
             print("· слишком коротко — пропускаю", flush=True)
             return
         audio = trim_silence(raw)
         print(f"○ стоп → обработка ({ring}/{sector or 'центр'})…", flush=True)
-        self._menubar.setStatus_("обработка…")
         self._jobs.begin()
         self._spinner.start()  # idempotent; keeps spinning while any job runs
         threading.Thread(
@@ -211,7 +215,6 @@ class VoiceWheel(NSObject):
     def finishProcessing_(self, _sender):  # noqa: N802
         if self._jobs.finish() == 0:
             self._spinner.stop()
-            self._menubar.setStatus_("Voice Wheel — готов")
         payload = self._jobs.pop_result()
         if payload is None:
             return
@@ -222,7 +225,6 @@ class VoiceWheel(NSObject):
         self._pulse.pulse_at(m.x, m.y, color)
         print(note, flush=True)
         self._menubar.update_history(self._history.recent())
-        self._menubar.set_restore_enabled(self._clipboard.has_previous())
 
     # -- worker thread --------------------------------------------------------
 
@@ -239,7 +241,6 @@ class VoiceWheel(NSObject):
                 if not text:
                     color, note = "red", f"⚠️  Пусто — {result.error or 'речь не распознана'}"
                 else:
-                    self._clipboard.push_current()
                     self._clipboard.write_text(result.result)
                     self._history.add(result.ring, result.sector, result.transcript, result.result)
                     preview = text.replace("\n", " ")[:120]

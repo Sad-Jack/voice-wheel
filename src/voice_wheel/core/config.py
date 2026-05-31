@@ -54,7 +54,9 @@ class DefaultMode:
 @dataclass(frozen=True)
 class TTSConfig:
     enabled: bool = True
-    voice: str = ""  # exact voice name to force (e.g. "Milena"); empty = best for the language
+    backend: str = "system"  # "system" (macOS voices) | "piper" (local neural, offline)
+    voice: str = ""  # system backend: exact voice name to force; empty = best for the language
+    piper_voice: str = "ru_RU-irina-medium"  # piper backend: which neural voice to use
     hotkey: HotkeyConfig = field(default_factory=lambda: HotkeyConfig(kind="mouse_side", key="4"))
 
 
@@ -121,7 +123,9 @@ def _parse_tts(section: Any) -> TTSConfig:
     )
     return TTSConfig(
         enabled=bool(section.get("enabled", True)),
+        backend=str(section.get("backend", "system")),
         voice=str(section.get("voice", "")),
+        piper_voice=str(section.get("piper_voice", "ru_RU-irina-medium")),
         hotkey=hotkey,
     )
 
