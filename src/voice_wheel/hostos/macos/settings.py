@@ -275,6 +275,7 @@ class SettingsWindow(NSObject):
         stack[0].addArrangedSubview_(self._rules_stack)
         self._add_rule_btn = button("+ Добавить правило", "addRule:", 180)
         stack[0].addArrangedSubview_(self._add_rule_btn)
+        stack[0].addArrangedSubview_(button("↺ Сбросить вкладку", "resetLlm:", 200))
 
         # ---- Speech (STT) tab ----
         add_tab("Речь")
@@ -288,6 +289,7 @@ class SettingsWindow(NSObject):
         self._lang = popup(LANGS)
         row("Язык", self._lang)
         hint("auto — определять язык по речи. Или зафиксируй ru/en для точности.")
+        stack[0].addArrangedSubview_(button("↺ Сбросить вкладку", "resetStt:", 200))
 
         # ---- Voice (TTS) tab ----
         add_tab("Голос")
@@ -307,6 +309,7 @@ class SettingsWindow(NSObject):
         self._cap_tts = button("Поймать", "captureTts:", 100)
         row("Кнопка озвучки", self._tts_kind, self._tts_key, self._cap_tts)
         hint("вид + кнопка/клавиша, или «Поймать» → нажми нужную.")
+        stack[0].addArrangedSubview_(button("↺ Сбросить вкладку", "resetVoice:", 200))
 
         # ---- Triggers tab ----
         add_tab("Триггеры")
@@ -319,6 +322,7 @@ class SettingsWindow(NSObject):
         header("⚙️ Прочее")
         self._concurrent = checkbox("Запись во время обработки (concurrent)")
         stack[0].addArrangedSubview_(self._concurrent)
+        stack[0].addArrangedSubview_(button("↺ Сбросить вкладку", "resetTriggers:", 200))
 
         # ---- Save + note (always visible, below the tabs) ----
         self._note = NSTextField.labelWithString_("")
@@ -472,6 +476,56 @@ class SettingsWindow(NSObject):
 
     def llmBackendChanged_(self, _sender):  # noqa: N802
         self._apply_llm_visibility(self._llm_value(str(self._backend.titleOfSelectedItem())))
+
+    # -- per-tab reset to defaults (#51) -------------------------------------
+    # Each button resets only its own tab's controls to the config dataclass
+    # defaults (the canonical "standard"); nothing is saved until the user hits
+    # «Сохранить», so a reset can still be backed out by closing the window.
+
+    def resetLlm_(self, _sender):  # noqa: N802
+        from ...core.config import LLMConfig
+
+        d = LLMConfig()
+        self._backend.selectItemWithTitle_(self._llm_label(d.backend))
+        self._apply_llm_visibility(d.backend)
+        self._ollama.setStringValue_(d.ollama_model)
+        self._claude.setStringValue_(d.model)
+        for r in list(self._rules):  # drop every per-prompt rule
+            self._rules_stack.removeView_(r["row"])
+        self._rules = []
+        self._refresh_add_button()
+        self._note.setStringValue_("Вкладка «LLM» сброшена. Нажми «Сохранить».")
+
+    def resetStt_(self, _sender):  # noqa: N802
+        from ...core.config import STTConfig
+
+        d = STTConfig()
+        self._stt_backend.selectItemWithTitle_(d.backend)
+        self._stt_model.selectItemWithTitle_(d.model)
+        self._lang.selectItemWithTitle_("ru")
+        self._note.setStringValue_("Вкладка «Речь» сброшена. Нажми «Сохранить».")
+
+    def resetVoice_(self, _sender):  # noqa: N802
+        from ...core.config import TTSConfig
+
+        d = TTSConfig()
+        self._tts_enabled.setState_(1 if d.enabled else 0)
+        self._tts_voice.selectItemWithTitle_(
+            self._voice_label({"backend": d.backend, "piper_voice": d.piper_voice})
+        )
+        self._tts_kind.selectItemWithTitle_(d.hotkey.kind)
+        self._tts_key.setStringValue_(d.hotkey.key)
+        self._apply_tts_enabled()
+        self._note.setStringValue_("Вкладка «Голос» сброшена. Нажми «Сохранить».")
+
+    def resetTriggers_(self, _sender):  # noqa: N802
+        from ...core.config import HotkeyConfig
+
+        d = HotkeyConfig()
+        self._wheel_kind.selectItemWithTitle_(d.kind)
+        self._wheel_key.setStringValue_(d.key)
+        self._concurrent.setState_(0)
+        self._note.setStringValue_("Вкладка «Триггеры» сброшена. Нажми «Сохранить».")
 
     # -- per-prompt model rules ----------------------------------------------
 
