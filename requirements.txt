@@ -22,5 +22,7 @@ piper-tts>=1.4.0
 
 # LLM — cloud option (claude_cli/claude_warm use the `claude` CLI; ollama is external)
 anthropic>=0.40.0
+# LLM — OpenAI direct-API backend (needs OPENAI_API_KEY)
+openai>=1.40.0
 # HTTP client for the local Ollama backend
 requests>=2.31

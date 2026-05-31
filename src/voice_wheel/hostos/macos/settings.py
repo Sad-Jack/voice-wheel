@@ -134,6 +134,7 @@ LLM_BACKENDS = [
     ("ollama", ("Локально — Ollama (бесплатно, без ключа)", "Local — Ollama (free, no key)")),
     ("claude_warm", ("Claude Max (подписка)", "Claude Max (subscription)")),
     ("anthropic", ("Claude API (нужен ключ)", "Claude API (needs a key)")),
+    ("openai", ("OpenAI API (нужен ключ)", "OpenAI API (needs a key)")),
     ("claude_cli", ("Claude CLI", "Claude CLI")),
 ]
 STT_BACKENDS = ["auto", "mlx", "faster-whisper"]
@@ -325,8 +326,8 @@ class SettingsWindow(NSObject):
         # The two model rows share one slot — only the relevant one is shown.
         self._ollama = field()
         self._ollama_row = row("ollama_model", self._ollama)
-        self._claude = field()
-        self._claude_row = row("claude_model", self._claude)
+        self._claude = field()  # shared by Claude (warm/cli/api) and OpenAI
+        self._claude_row = row("model", self._claude)
         header("rules_header")
         hint("rules_hint")
         self._sectors = list(sectors())
