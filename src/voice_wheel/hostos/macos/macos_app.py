@@ -18,6 +18,7 @@ import atexit
 import fcntl
 import logging
 import os
+import signal
 import threading
 import time
 
@@ -578,6 +579,25 @@ def main() -> None:
     controller = VoiceWheel.alloc().initWithConfig_(config)
     app.setDelegate_(controller)               # applicationWillTerminate_ -> quit cleanup (menu Quit)
     atexit.register(controller._cleanup_on_quit)  # normal interpreter exit / unhandled crash / Ctrl+C
+
+    # SIGTERM/SIGHUP (e.g. `pkill`, or run.sh's group-TERM on stop/restart) would
+    # otherwise hard-kill us with no cleanup, leaving the ollama model loaded and a
+    # warm `claude` orphaned. Run the same quit teardown, then exit. The handler
+    # fires when the run loop next yields to Python — the 1s heartbeat guarantees
+    # that within ~1s. (SIGINT/Ctrl+C is already covered by atexit.)
+    def _on_term_signal(signum, _frame):  # noqa: ANN001
+        log.info("signal %s received — cleaning up and exiting", signum)
+        try:
+            controller._cleanup_on_quit()
+        finally:
+            os._exit(0)
+
+    for _sig in (signal.SIGTERM, signal.SIGHUP):
+        try:
+            signal.signal(_sig, _on_term_signal)
+        except (ValueError, OSError) as exc:  # not on the main thread / unsupported
+            log.debug("could not install handler for signal %s: %s", _sig, exc)
+
     controller.start()
     AppHelper.runEventLoop()
 

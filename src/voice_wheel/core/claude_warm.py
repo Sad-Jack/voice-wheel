@@ -27,7 +27,11 @@ def _terminate(proc) -> None:
     except (OSError, ValueError):
         pass
     try:
-        proc.terminate()
+        proc.terminate()  # SIGTERM first (polite)
+    except OSError:
+        pass
+    try:
+        proc.kill()  # then SIGKILL — guarantee the throwaway child is gone, no lingering claude
     except OSError:
         pass
 
