@@ -38,6 +38,8 @@ from ...core.pipeline import Pipeline
 from ...core.recorder import Recorder, trim_silence
 from ...core.stt import STTEngine
 from .clipboard import Clipboard
+from .i18n import resolve_lang
+from .i18n import t as _tr
 from .pulse import ProcessingIndicator, PulseOverlay
 from .settings import SettingsWindow
 from .tray import MenuBar
@@ -58,6 +60,7 @@ class VoiceWheel(NSObject):
         if self is None:
             return None
         self._config = config
+        self._lang = resolve_lang(getattr(config, "ui_language", ""))
         self._concurrent = bool(getattr(config, "concurrent", False))
         self._recording = False
         self._triggers_ok = False    # green icon only once the trigger is actually live
@@ -80,9 +83,10 @@ class VoiceWheel(NSObject):
         self._wheel = WheelOverlay()
         self._pulse = PulseOverlay()
         self._spinner = ProcessingIndicator()
-        self._menubar = MenuBar.alloc().init()
+        self._menubar = MenuBar.alloc().initWithLang_(self._lang)
         self._settings_win = SettingsWindow.alloc().init()
         self._settings_win.set_apply_callback(self._apply_config_live)
+        self._settings_win.set_restart_callback(self._restart)
         self._menubar.set_handlers(self._on_reuse, self._settings_win.show)
         self._menubar.update_history(self._history.recent())
         self._speaker = self._make_speaker(config)
@@ -139,8 +143,9 @@ class VoiceWheel(NSObject):
             1.0, self, "heartbeat:", None, True
         )
         print(
-            f"Voice Wheel готов. Зажми {self._config.hotkey.kind}:{self._config.hotkey.key}, "
-            "говори, отпусти. Центр = текст, сектор = стиль. Ctrl+C для выхода.",
+            _tr("ready_msg", self._lang).format(
+                self._config.hotkey.kind, self._config.hotkey.key
+            ),
             flush=True,
         )
 
@@ -369,6 +374,25 @@ class VoiceWheel(NSObject):
             sd.stop()
         except Exception as exc:  # noqa: BLE001
             log.debug("cleanup (audio): %s", exc)
+
+    @objc.python_method
+    def _restart(self):
+        """Relaunch the app in place (used when the interface language changes, so
+        the menu bar and everything rebuild in the new language). Clean up what we
+        spawned, drop the heartbeat so the supervisor doesn't see it go stale during
+        the swap, then re-exec the same interpreter — same PID, grants intact."""
+        import sys
+
+        log.info("restarting to apply interface language")
+        try:
+            self._cleanup()
+        except Exception as exc:  # noqa: BLE001
+            log.debug("restart cleanup: %s", exc)
+        try:
+            self._heartbeat_path.unlink(missing_ok=True)
+        except Exception as exc:  # noqa: BLE001
+            log.debug("restart heartbeat unlink: %s", exc)
+        os.execv(sys.executable, [sys.executable, "-m", "voice_wheel"])
 
     def applicationWillTerminate_(self, _notif):  # noqa: N802
         self._cleanup()
