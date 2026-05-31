@@ -65,6 +65,7 @@ class SettingsWindow(NSObject):
         self = objc.super(SettingsWindow, self).init()
         if self is not None:
             self._window = None
+            self._preview_speaker = None  # plays a sample when the voice changes
         return self
 
     # -- public ---------------------------------------------------------------
@@ -181,6 +182,8 @@ class SettingsWindow(NSObject):
         gap(30)
         rowlabel("Голос")
         self._tts_voice = popup([v[0] for v in TTS_VOICES])
+        self._tts_voice.setTarget_(self)
+        self._tts_voice.setAction_("ttsVoiceChanged:")  # play a sample on change
         gap()
         self._prem = NSButton.buttonWithTitle_target_action_(
             "macOS: скачать премиум-голоса…", self, "downloadPremium:"
@@ -323,6 +326,32 @@ class SettingsWindow(NSObject):
 
     def ttsEnabledChanged_(self, _sender):  # noqa: N802
         self._apply_tts_enabled()
+
+    def ttsVoiceChanged_(self, _sender):  # noqa: N802
+        self._preview_voice()
+
+    @objc.python_method
+    def _preview_voice(self):
+        """Speak a short sample with the just-selected voice so you can hear it."""
+        backend, piper_voice = self._selected_voice()
+        try:
+            if self._preview_speaker is not None:
+                self._preview_speaker.stop()  # cut off the previous sample
+            if backend == "piper":
+                from ...core.config import app_support_dir
+                from ...core.piper_tts import PiperSpeaker
+
+                cache = app_support_dir() / "piper"
+                if not (cache / f"{piper_voice}.onnx").exists():
+                    self._note.setStringValue_("Скачиваю голос для прослушивания…")
+                self._preview_speaker = PiperSpeaker(piper_voice, cache)
+            else:
+                from .tts import Speaker
+
+                self._preview_speaker = Speaker("")  # macOS, best for the language
+            self._preview_speaker.toggle("Привет! Это пример выбранного голоса.")
+        except Exception as exc:  # noqa: BLE001 - preview must never break the window
+            log.warning("voice preview failed: %s", exc)
 
     # -- TTS voice helpers ----------------------------------------------------
 
