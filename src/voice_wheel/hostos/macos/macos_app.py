@@ -14,6 +14,7 @@ blocks. Only NSPanel/NSView work touches the main thread.
 
 from __future__ import annotations
 
+import atexit
 import logging
 import os
 import threading
@@ -332,6 +333,32 @@ class VoiceWheel(NSObject):
         self._jobs.push_result((color, note, token))
         self.performSelectorOnMainThread_withObject_waitUntilDone_("finishProcessing:", None, False)
 
+    # -- shutdown -------------------------------------------------------------
+
+    @objc.python_method
+    def _cleanup(self):
+        """Kill everything we spawned so nothing is left running after we exit or
+        crash: the pre-warmed `claude` subprocess and any audio playback. Safe to
+        call more than once."""
+        try:
+            self._llm.discard_prewarm()
+        except Exception as exc:  # noqa: BLE001
+            log.debug("cleanup (llm): %s", exc)
+        try:
+            if self._speaker is not None:
+                self._speaker.stop()
+        except Exception as exc:  # noqa: BLE001
+            log.debug("cleanup (speaker): %s", exc)
+        try:
+            import sounddevice as sd
+
+            sd.stop()
+        except Exception as exc:  # noqa: BLE001
+            log.debug("cleanup (audio): %s", exc)
+
+    def applicationWillTerminate_(self, _notif):  # noqa: N802
+        self._cleanup()
+
 
 def _ensure_accessibility() -> bool:
     """Prompt to add this binary to Accessibility (needed for the global hotkey)."""
@@ -379,6 +406,8 @@ def main() -> None:
     _ensure_accessibility()
     config = Config.load()
     controller = VoiceWheel.alloc().initWithConfig_(config)
+    app.setDelegate_(controller)            # applicationWillTerminate_ -> cleanup (menu Quit)
+    atexit.register(controller._cleanup)    # normal interpreter exit / unhandled crash
     controller.start()
     AppHelper.runEventLoop()
 
