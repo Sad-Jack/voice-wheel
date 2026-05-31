@@ -468,6 +468,14 @@ class SettingsWindow(NSObject):
             out.append({"kind": str(ms_kind.titleOfSelectedItem()), "key": mkey})
         return out
 
+    @objc.python_method
+    def _trigger_sig(self, raw):
+        """Order-independent signature of a trigger's bindings, so a legacy single
+        {kind,key} and the equivalent one-item list compare equal."""
+        return frozenset(
+            (str(b.get("kind", "")), str(b.get("key", ""))) for b in _hotkey_bindings(raw)
+        )
+
     # -- load / save ----------------------------------------------------------
 
     @objc.python_method
@@ -523,7 +531,8 @@ class SettingsWindow(NSObject):
         self._set_dirty(False)
 
     def save_(self, _sender):  # noqa: N802
-        old_lang = resolve_lang(self._read().get("ui_language"))
+        old = self._read()
+        old_lang = resolve_lang(old.get("ui_language"))
         new_lang = "ru" if int(self._uilang_popup.indexOfSelectedItem()) == 0 else "en"
         data = self._read()
         data["ui_language"] = new_lang
@@ -567,8 +576,19 @@ class SettingsWindow(NSObject):
             log.warning("could not write %s: %s", self._path(), exc)
             self._note.setStringValue_(self._t("note_save_fail").format(exc))
             return
-        # A language change needs the menu bar (and everything) rebuilt -> restart.
-        if new_lang != old_lang and self._restart_cb is not None:
+        # Some settings can't be swapped live: the language (menu bar + all chrome),
+        # the triggers (the event tap / pynput listeners) and the STT model (Whisper
+        # reload). When any of those changed, restart the app — that applies them
+        # cleanly, instead of asking the user to quit and relaunch by hand (#50).
+        needs_restart = (
+            new_lang != old_lang
+            or self._trigger_sig(old.get("hotkey")) != self._trigger_sig(data["hotkey"])
+            or self._trigger_sig(old.get("tts", {}).get("hotkey"))
+            != self._trigger_sig(data["tts"]["hotkey"])
+            or str(old.get("stt", {}).get("backend", "auto")) != data["stt"]["backend"]
+            or str(old.get("stt", {}).get("model", "small")) != data["stt"]["model"]
+        )
+        if needs_restart and self._restart_cb is not None:
             self._note.setStringValue_(self._t("note_restarting"))
             self._set_dirty(False)
             self._restart_cb()  # cleans up + re-execs; does not return

@@ -52,8 +52,8 @@ STR = {
         "auto — detect the language from speech. Or pin ru/en for accuracy.",
     ),
     "stt_restart": (
-        "⏱ Движок и модель распознавания применяются после перезапуска.",
-        "⏱ Recognition engine and model apply after a restart.",
+        "⏱ Смена движка/модели распознавания перезапустит приложение при «Сохранить».",
+        "⏱ Changing the recognition engine/model restarts the app on «Save».",
     ),
     # Voice tab
     "voice_header": ("🔊 Голос (озвучка)", "🔊 Voice (text-to-speech)"),
@@ -79,8 +79,8 @@ STR = {
         "Leave the mouse row empty if you have no mouse — the keyboard is enough.",
     ),
     "trig_restart": (
-        "⏱ Триггеры применяются после перезапуска приложения.",
-        "⏱ Triggers apply after the app restarts.",
+        "⏱ Смена триггера применится сразу: при «Сохранить» приложение перезапустится.",
+        "⏱ A trigger change applies right away: the app restarts on «Save».",
     ),
     "misc_header": ("⚙️ Прочее", "⚙️ Other"),
     "concurrent": (

@@ -46,3 +46,21 @@ def test_reset_that_changes_a_value_arms_save():
     assert w._dirty is True
     assert w._save_btn.isEnabled()
     assert str(w._stt_model.titleOfSelectedItem()) == "small"
+
+
+def test_trigger_sig_legacy_dict_equals_one_item_list():
+    # The restart-on-save decision (#50) must treat a legacy {kind,key} and the
+    # equivalent one-item list as the same binding, and be order-independent.
+    w = _window()
+    assert w._trigger_sig({"kind": "mouse_side", "key": "3"}) == w._trigger_sig(
+        [{"kind": "mouse_side", "key": "3"}]
+    )
+    assert w._trigger_sig(
+        [{"kind": "keyboard", "key": "a"}, {"kind": "mouse_side", "key": "3"}]
+    ) == w._trigger_sig(
+        [{"kind": "mouse_side", "key": "3"}, {"kind": "keyboard", "key": "a"}]
+    )
+    assert w._trigger_sig({"kind": "mouse_side", "key": "3"}) != w._trigger_sig(
+        {"kind": "mouse_side", "key": "4"}
+    )
+    assert w._trigger_sig(None) == frozenset()
