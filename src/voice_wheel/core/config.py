@@ -25,8 +25,10 @@ def app_support_dir() -> Path:
 
 @dataclass(frozen=True)
 class HotkeyConfig:
-    kind: str = "keyboard"  # 'keyboard' | 'mouse'
-    key: str = "f8"
+    # Default to a side mouse button: macOS reserves the media keys (F7–F9), so a
+    # bare 'f8' never reaches the app — the side button "just works" out of the box.
+    kind: str = "mouse_side"  # 'mouse_side' (side button N) | 'keyboard' | 'mouse'
+    key: str = "3"
 
 
 @dataclass(frozen=True)
