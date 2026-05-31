@@ -34,8 +34,11 @@ from AppKit import (
 from Foundation import NSMakeRect, NSObject
 
 from ...core.config import _project_root
+from ...core.modes import sectors
 
 log = logging.getLogger(__name__)
+
+BASE_MODEL_LABEL = "(как базовая)"  # per-prompt override = "no override, use the default LLM"
 
 # (human label, config value) — the LLM backend picker shows the label, stores the value.
 LLM_BACKENDS = [
@@ -57,7 +60,7 @@ TTS_VOICES = [
     ("Piper: Дмитрий — нейро (RU, муж.)", "piper", "ru_RU-dmitri-medium"),
 ]
 W = 500
-H = 800
+H = 940
 
 
 class SettingsWindow(NSObject):
@@ -66,6 +69,8 @@ class SettingsWindow(NSObject):
         if self is not None:
             self._window = None
             self._preview_speaker = None  # plays a sample when the voice changes
+            self._sector_overrides = {}   # sector_key -> {backend, model}; per-prompt model
+            self._editing_sector = None   # which prompt's override is currently in the fields
         return self
 
     # -- public ---------------------------------------------------------------
@@ -197,6 +202,19 @@ class SettingsWindow(NSObject):
         hint("вид + кнопка/клавиша: mouse_side + 4, либо keyboard + f9, либо mouse + middle.")
         gap()
 
+        header("🎛 Модель на промпт (опц.)")
+        self._sectors = list(sectors())
+        rowlabel("Промпт")
+        self._prompt = popup([s.label for s in self._sectors])
+        self._prompt.setTarget_(self)
+        self._prompt.setAction_("promptChanged:")
+        gap()
+        rowlabel("Модель")
+        self._sec_backend = popup([BASE_MODEL_LABEL] + [lbl for lbl, _ in LLM_BACKENDS], x=200, w=150)
+        self._sec_model = field(x=358, w=112)
+        hint("«(как базовая)» = движок/модель из блока «Обработка речи». Иначе — свои для этого промпта.")
+        gap()
+
         header("⚙️ Прочее")
         self._concurrent = checkbox("Запись во время обработки (concurrent)")
         gap(30)
@@ -250,6 +268,14 @@ class SettingsWindow(NSObject):
         self._tts_enabled.setState_(1 if tts.get("enabled", True) else 0)
         self._apply_tts_enabled()
         self._concurrent.setState_(1 if data.get("concurrent", False) else 0)
+        self._sector_overrides = {
+            k: v for k, v in (data.get("sector_models") or {}).items()
+            if isinstance(v, dict)  # skip the "_comment" string
+        }
+        self._editing_sector = None
+        if self._sectors:
+            self._prompt.selectItemAtIndex_(0)
+        self._load_selected_override()
         self._note.setStringValue_("")
 
     def save_(self, _sender):  # noqa: N802
@@ -277,6 +303,13 @@ class SettingsWindow(NSObject):
         if backend == "piper":
             data["tts"]["piper_voice"] = piper_voice
         data["concurrent"] = bool(self._concurrent.state())
+        # per-prompt model overrides (capture the prompt currently shown first)
+        self._save_current_override()
+        existing = data.get("sector_models")
+        sm = dict(self._sector_overrides)
+        if isinstance(existing, dict) and "_comment" in existing:
+            sm["_comment"] = existing["_comment"]
+        data["sector_models"] = sm
         try:
             self._path().write_text(
                 json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
@@ -316,6 +349,44 @@ class SettingsWindow(NSObject):
 
     def llmBackendChanged_(self, _sender):  # noqa: N802
         self._apply_llm_visibility(self._llm_value(str(self._backend.titleOfSelectedItem())))
+
+    # -- per-prompt model override -------------------------------------------
+
+    @objc.python_method
+    def _sector_key_for_label(self, label: str):
+        return next((s.key for s in self._sectors if s.label == label), None)
+
+    @objc.python_method
+    def _save_current_override(self):
+        """Persist the fields into the in-memory map for the prompt being edited."""
+        key = self._editing_sector
+        if not key:
+            return
+        backend_label = str(self._sec_backend.titleOfSelectedItem())
+        if backend_label == BASE_MODEL_LABEL:
+            self._sector_overrides.pop(key, None)  # no override -> use the default LLM
+        else:
+            self._sector_overrides[key] = {
+                "backend": self._llm_value(backend_label),
+                "model": str(self._sec_model.stringValue()).strip(),
+            }
+
+    @objc.python_method
+    def _load_selected_override(self):
+        """Load the selected prompt's override (or 'base') into the fields."""
+        key = self._sector_key_for_label(str(self._prompt.titleOfSelectedItem()))
+        self._editing_sector = key
+        override = self._sector_overrides.get(key) if key else None
+        if override:
+            self._sec_backend.selectItemWithTitle_(self._llm_label(override.get("backend", "ollama")))
+            self._sec_model.setStringValue_(str(override.get("model", "")))
+        else:
+            self._sec_backend.selectItemWithTitle_(BASE_MODEL_LABEL)
+            self._sec_model.setStringValue_("")
+
+    def promptChanged_(self, _sender):  # noqa: N802
+        self._save_current_override()    # keep edits for the prompt we're leaving
+        self._load_selected_override()   # show the newly-selected prompt's override
 
     @objc.python_method
     def _apply_tts_enabled(self):
