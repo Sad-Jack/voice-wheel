@@ -86,22 +86,32 @@ STR = {
     # Speech tab
     "stt_header": ("🎙 Распознавание (речь → текст)", "🎙 Recognition (speech → text)"),
     "stt_engine_hint": (
-        "Чем распознаём речь. auto: mlx на Apple Silicon, иначе faster-whisper (можно не трогать).",
-        "Speech recognizer. auto: mlx on Apple Silicon, else faster-whisper (safe to leave).",
+        "Чем распознаём речь:\n"
+        "• auto — выбирает сам: mlx на Apple Silicon, faster-whisper на остальных. Рекомендуется.\n"
+        "• mlx — Apple MLX на GPU/Neural Engine: быстрее всего, только чипы M-серии.\n"
+        "• faster-whisper — на CPU (int8): работает везде, медленнее. Запасной вариант.",
+        "Speech recognizer:\n"
+        "• auto — picks for you: mlx on Apple Silicon, faster-whisper elsewhere. Recommended.\n"
+        "• mlx — Apple MLX on the GPU/Neural Engine: fastest, M-series chips only.\n"
+        "• faster-whisper — CPU (int8): runs anywhere, slower. Fallback.",
     ),
     "model": ("Модель", "Model"),
     "stt_model_hint": (
-        "tiny → быстро/грубо · medium/large → точно/медленно. small — оптимум для русского.",
-        "tiny → fast/rough · medium/large → accurate/slow. small is the Russian sweet spot.",
+        "Размер модели — точность против скорости и памяти:\n"
+        "• tiny / base — очень быстро, грубо. Для коротких команд.\n"
+        "• small — баланс качества и скорости, оптимум для русского. Рекомендуется.\n"
+        "• medium — заметно точнее, но медленнее и требует больше памяти.\n"
+        "• large — максимум точности, самая тяжёлая (для мощных Mac).",
+        "Model size — accuracy vs. speed and memory:\n"
+        "• tiny / base — very fast, rough. For short commands.\n"
+        "• small — balanced, the Russian sweet spot. Recommended.\n"
+        "• medium — noticeably more accurate, but slower and heavier.\n"
+        "• large — top accuracy, heaviest (for powerful Macs).",
     ),
     "language": ("Язык", "Language"),
     "stt_lang_hint": (
         "auto — определять язык по речи. Или зафиксируй ru/en для точности.",
         "auto — detect the language from speech. Or pin ru/en for accuracy.",
-    ),
-    "stt_restart": (
-        "⏱ Смена движка/модели распознавания перезапустит приложение при «Сохранить».",
-        "⏱ Changing the recognition engine/model restarts the app on «Save».",
     ),
     # Voice tab
     "voice_header": ("🔊 Голос (озвучка)", "🔊 Voice (text-to-speech)"),
@@ -109,22 +119,13 @@ STR = {
     "voice": ("Голос", "Voice"),
     "premium": ("macOS: скачать премиум-голоса…", "macOS: download premium voices…"),
     "tts_button": ("Кнопка озвучки", "Read-aloud button"),
-    "tts_hint": (
-        "вид + кнопка/клавиша, или «Поймать» → нажми нужную.",
-        "type + button/key, or «Catch» → press the one you want.",
-    ),
     # Triggers tab
     "trig_header": ("⌨️ Триггер записи (колесо)", "⌨️ Record trigger (wheel)"),
-    "trig_button": ("Кнопка", "Button"),
     "trig_kb": ("Клавиатура", "Keyboard"),
     "trig_mouse": ("Мышь", "Mouse"),
     "trig_hint": (
         "Обе строки работают одновременно. «Поймать» → нажми нужную клавишу/комбо или кнопку мыши.",
         "Both rows are live at once. «Catch» → press the key/combo or mouse button you want.",
-    ),
-    "trig_mouse_hint": (
-        "Мышь можно оставить пустой, если её нет — хватит клавиатуры.",
-        "Leave the mouse row empty if you have no mouse — the keyboard is enough.",
     ),
     "trig_check_hint": (
         "Галочка слева включает/выключает вид триггера; выключенный — заблокирован. "
@@ -146,10 +147,6 @@ STR = {
     ),
     "mouse_custom_side": ("Боковая {}", "Side button {}"),
     "mouse_custom_btn": ("Кнопка мыши {}", "Mouse button {}"),
-    "trig_restart": (
-        "⏱ Смена триггера применится сразу: при «Сохранить» приложение перезапустится.",
-        "⏱ A trigger change applies right away: the app restarts on «Save».",
-    ),
     "misc_header": ("⚙️ Прочее", "⚙️ Other"),
     "concurrent": (
         "Запись во время обработки (concurrent)",
@@ -157,14 +154,9 @@ STR = {
     ),
     # Language tab
     "lang_header": ("🌐 Язык интерфейса", "🌐 Interface language"),
-    "lang_row": ("Язык интерфейса", "Interface language"),
     "lang_hint": (
         "Меняет язык всего приложения (меню и настройки). По умолчанию — как в системе.",
         "Changes the language of the whole app (menu and settings). Defaults to your system.",
-    ),
-    "lang_restart_warn": (
-        "⚠️ После «Сохранить» приложение перезапустится, чтобы сменить язык.",
-        "⚠️ After «Save» the app will restart to change the language.",
     ),
     "restart_warn_global": (
         "⚠️ Несохранённые изменения (язык / триггеры / STT) перезапустят приложение при «Сохранить».",

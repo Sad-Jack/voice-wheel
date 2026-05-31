@@ -64,7 +64,14 @@ from AppKit import (
 )
 from Foundation import NSMakeRect, NSObject
 
-from ...core.config import _project_root, app_support_dir
+from ...core.config import (
+    STTConfig,
+    TTSConfig,
+    _project_root,
+    app_support_dir,
+    read_env,
+    write_env_key,
+)
 from ...core.modes import sectors
 from .i18n import detect_ui_lang, resolve_lang
 from .i18n import t as _tr
@@ -158,7 +165,6 @@ ANTHROPIC_MODELS = ["claude-haiku-4-5", "claude-sonnet-4-5"]
 OPENAI_MODELS = ["gpt-4o-mini", "gpt-4o"]
 CC_MODELS = ["claude-haiku-4-5", "claude-sonnet-4-5"]
 LANGS = ["auto", "ru", "en"]
-KINDS = ["mouse_side", "keyboard", "mouse"]
 # Friendly mouse-button picker (#mouse-selector): (kind, key, (ru, en)). Index-mapped;
 # a «Поймать» of an unlisted button appends a custom item. Side-button NUMBERS depend
 # on the mouse, so these are common defaults — others are added by capture.
@@ -452,6 +458,9 @@ class SettingsWindow(NSObject):
         stack[0].addArrangedSubview_(self._ollama_status)
         self._ollama_action = NSButton.buttonWithTitle_target_action_("", self, "ollamaAction:")
         self._ollama_action.widthAnchor().constraintEqualToConstant_(200).setActive_(True)
+        # Hidden until a real action is needed (Установить/Запустить) — otherwise an
+        # empty-titled button would show as a mysterious grey box next to «Проверить».
+        self._ollama_action.setHidden_(True)
         status_btns = NSStackView.alloc().init()
         status_btns.setOrientation_(NSUserInterfaceLayoutOrientationHorizontal)
         status_btns.setSpacing_(8)
@@ -649,25 +658,30 @@ class SettingsWindow(NSObject):
         self._update_restart_warn()
 
     @objc.python_method
-    def _restart_pending(self):
-        """Would saving NOW restart the app? (language / triggers / STT changed vs
-        the saved config). Mirrors the needs_restart logic in save_."""
-        old = self._read()
-        old_lang = resolve_lang(old.get("ui_language"))
-        new_lang = "ru" if int(self._uilang_popup.indexOfSelectedItem()) == 0 else "en"
-        new_wheel = self._collect_trigger(
-            self._wheel_kb_on, self._wheel_kb, self._wheel_ms_on,
-            self._wheel_ms, self._wheel_ms_map,
-        )
-        new_tts = self._collect_trigger(
-            self._tts_kb_on, self._tts_kb, self._tts_ms_on, self._tts_ms, self._tts_ms_map,
-        )
+    def _restart_changed(self, old, new_lang, new_wheel, new_tts, new_stt_backend, new_stt_model):
+        """Do these new values differ from the saved config in a way that needs a
+        restart? — language / triggers / STT, none of which can be swapped live.
+        Single source of truth for both save_ (the decision) and the warning label."""
         return (
-            new_lang != old_lang
+            new_lang != resolve_lang(old.get("ui_language"))
             or self._trigger_sig(old.get("hotkey")) != self._trigger_sig(new_wheel)
             or self._trigger_sig(old.get("tts", {}).get("hotkey")) != self._trigger_sig(new_tts)
-            or str(old.get("stt", {}).get("backend", "auto")) != str(self._stt_backend.titleOfSelectedItem())
-            or str(old.get("stt", {}).get("model", "small")) != str(self._stt_model.titleOfSelectedItem())
+            or str(old.get("stt", {}).get("backend", STTConfig.backend)) != new_stt_backend
+            or str(old.get("stt", {}).get("model", STTConfig.model)) != new_stt_model
+        )
+
+    @objc.python_method
+    def _restart_pending(self):
+        """Would saving NOW restart the app? (compares live controls to the saved config)."""
+        return self._restart_changed(
+            self._read(),
+            "ru" if int(self._uilang_popup.indexOfSelectedItem()) == 0 else "en",
+            self._collect_trigger(self._wheel_kb_on, self._wheel_kb, self._wheel_ms_on,
+                                  self._wheel_ms, self._wheel_ms_map),
+            self._collect_trigger(self._tts_kb_on, self._tts_kb, self._tts_ms_on,
+                                  self._tts_ms, self._tts_ms_map),
+            str(self._stt_backend.titleOfSelectedItem()),
+            str(self._stt_model.titleOfSelectedItem()),
         )
 
     @objc.python_method
@@ -839,7 +853,6 @@ class SettingsWindow(NSObject):
 
     def save_(self, _sender):  # noqa: N802
         old = self._read()
-        old_lang = resolve_lang(old.get("ui_language"))
         new_lang = "ru" if int(self._uilang_popup.indexOfSelectedItem()) == 0 else "en"
         data = self._read()
         data["ui_language"] = new_lang
@@ -902,13 +915,9 @@ class SettingsWindow(NSObject):
         # the triggers (the event tap / pynput listeners) and the STT model (Whisper
         # reload). When any of those changed, restart the app — that applies them
         # cleanly, instead of asking the user to quit and relaunch by hand (#50).
-        needs_restart = (
-            new_lang != old_lang
-            or self._trigger_sig(old.get("hotkey")) != self._trigger_sig(data["hotkey"])
-            or self._trigger_sig(old.get("tts", {}).get("hotkey"))
-            != self._trigger_sig(data["tts"]["hotkey"])
-            or str(old.get("stt", {}).get("backend", "auto")) != data["stt"]["backend"]
-            or str(old.get("stt", {}).get("model", "small")) != data["stt"]["model"]
+        needs_restart = self._restart_changed(
+            old, new_lang, data["hotkey"], data["tts"]["hotkey"],
+            data["stt"]["backend"], data["stt"]["model"],
         )
         if needs_restart and self._restart_cb is not None:
             try:  # so the restarted app can reopen settings on the tab we were on
@@ -1167,55 +1176,14 @@ class SettingsWindow(NSObject):
 
     @objc.python_method
     def _read_env(self) -> dict:
-        out: dict = {}
-        try:
-            for line in self._env_path().read_text(encoding="utf-8").splitlines():
-                s = line.strip()
-                if not s or s.startswith("#") or "=" not in s:
-                    continue
-                k, v = s.split("=", 1)
-                out[k.strip()] = v.strip().strip("\"'")
-        except FileNotFoundError:
-            pass
-        except OSError as exc:
-            log.warning("could not read .env: %s", exc)
-        return out
+        return read_env(self._env_path())
 
     @objc.python_method
     def _write_env_key(self, var: str, value: str) -> None:
-        """Update/append ``var=value`` in .env (preserving other lines), and reflect
-        it in this process's env so the live-applied LLM client picks it up at once.
-        An empty value removes the line / unsets it."""
-        import os
-
-        path = self._env_path()
-        lines = []
         try:
-            lines = path.read_text(encoding="utf-8").splitlines()
-        except FileNotFoundError:
-            pass
-        except OSError as exc:
-            log.warning("could not read .env for write: %s", exc)
-        out, found = [], False
-        for line in lines:
-            s = line.strip()
-            if s and not s.startswith("#") and "=" in s and s.split("=", 1)[0].strip() == var:
-                found = True
-                if value:
-                    out.append(f"{var}={value}")  # else drop the line
-            else:
-                out.append(line)
-        if value and not found:
-            out.append(f"{var}={value}")
-        try:
-            path.write_text("\n".join(out) + ("\n" if out else ""), encoding="utf-8")
+            write_env_key(self._env_path(), var, value)
         except OSError as exc:
             log.warning("could not write .env: %s", exc)
-            return
-        if value:
-            os.environ[var] = value
-        else:
-            os.environ.pop(var, None)
 
     # -- per-tab reset to defaults (#51) -------------------------------------
     # «Сброс» (bottom bar) resets the *active* tab's controls to the config
@@ -1512,8 +1480,8 @@ class SettingsWindow(NSObject):
     @objc.python_method
     def _select_voice(self, tts: dict):
         """Select the dropdown row matching the saved (backend, piper_voice)."""
-        backend = tts.get("backend", "system")
-        pv = tts.get("piper_voice", "ru_RU-irina-medium")
+        backend = tts.get("backend", TTSConfig.backend)  # single source of truth (#H1)
+        pv = tts.get("piper_voice", TTSConfig.piper_voice)
         i = next(
             (i for i, (b, p, _l) in enumerate(TTS_VOICES) if b == backend and (b != "piper" or p == pv)),
             0,

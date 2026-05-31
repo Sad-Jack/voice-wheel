@@ -133,7 +133,7 @@ def _slug(label: str) -> str:
 
 
 # Sectors load lazily from prompts/ on first access — no file I/O at import time.
-# Edit files in prompts/ and restart (or call reload_sectors()) to change the wheel.
+# Edit files in prompts/ and restart the app to change the wheel.
 _cache: tuple | None = None
 
 
@@ -142,11 +142,6 @@ def sectors() -> tuple[Sector, ...]:
     if _cache is None:
         _cache = tuple(load_sectors())
     return _cache
-
-
-def reload_sectors() -> None:
-    global _cache
-    _cache = None
 
 
 def sector_keys() -> tuple[str, ...]:
