@@ -57,7 +57,7 @@ TTS_VOICES = [
     ("Piper: Дмитрий — нейро (RU, муж.)", "piper", "ru_RU-dmitri-medium"),
 ]
 W = 500
-H = 720
+H = 800
 
 
 class SettingsWindow(NSObject):
@@ -107,12 +107,12 @@ class SettingsWindow(NSObject):
             return f
 
         def header(s):
-            cur[0] -= 30
+            cur[0] -= 24          # space above the section header
             text(s, 20, W - 40, 13, bold=True)
-            cur[0] -= 4
+            cur[0] -= 28          # clear the header line before the first row
 
         def hint(s):
-            cur[0] -= 17
+            cur[0] -= 21
             text(s, 40, W - 60, 10, color=NSColor.secondaryLabelColor())
 
         def rowlabel(s, x=40, w=150):
@@ -135,7 +135,7 @@ class SettingsWindow(NSObject):
             content.addSubview_(b)
             return b
 
-        def gap(px=34):
+        def gap(px=32):
             cur[0] -= px
 
         text("Настройки", 20, 300, 17, bold=True)
