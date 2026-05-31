@@ -376,13 +376,21 @@ class VoiceWheel(NSObject):
 
     @objc.python_method
     def _restart(self):
-        """Relaunch the app in place (used when the interface language changes, so
-        the menu bar and everything rebuild in the new language). Clean up what we
-        spawned, drop the heartbeat so the supervisor doesn't see it go stale during
-        the swap, then re-exec the same interpreter — same PID, grants intact."""
+        """Relaunch the app in place so changes that can't be swapped live (language,
+        triggers, STT model) take effect without the user quitting by hand. Clean up
+        what we spawned, drop the heartbeat so the supervisor doesn't see it go stale
+        during the swap, then re-exec — same PID, grants intact.
+
+        The package isn't pip-installed (it runs from ``src``). The project path
+        contains a colon, so we can't put ``src`` on PYTHONPATH (Python splits it on
+        ``os.pathsep`` == ":"). Instead we re-exec via ``-c`` that injects ``src`` onto
+        ``sys.path`` as a plain string and runs the module with runpy — colon-safe and
+        independent of cwd / how we were launched."""
         import sys
 
-        log.info("restarting to apply interface language")
+        from ...core.config import _project_root
+
+        log.info("restarting to apply settings (language / triggers / STT)")
         try:
             self._cleanup()
         except Exception as exc:  # noqa: BLE001
@@ -391,7 +399,17 @@ class VoiceWheel(NSObject):
             self._heartbeat_path.unlink(missing_ok=True)
         except Exception as exc:  # noqa: BLE001
             log.debug("restart heartbeat unlink: %s", exc)
-        os.execv(sys.executable, [sys.executable, "-m", "voice_wheel"])
+        src = str(_project_root() / "src")
+        code = (
+            "import sys, runpy; "
+            f"sys.path.insert(0, {src!r}); "
+            "runpy.run_module('voice_wheel', run_name='__main__')"
+        )
+        try:
+            os.execv(sys.executable, [sys.executable, "-c", code])
+        except OSError as exc:  # last-ditch: a clean exit lets the run.sh supervisor relaunch
+            log.warning("re-exec failed (%s); exiting for the supervisor to restart", exc)
+            os._exit(1)
 
     def applicationWillTerminate_(self, _notif):  # noqa: N802
         self._cleanup()
