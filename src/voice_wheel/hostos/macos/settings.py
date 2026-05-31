@@ -77,6 +77,14 @@ class _FlippedView(NSView):
     def isFlipped(self):  # noqa: N802
         return True
 
+    def mouseDown_(self, event):  # noqa: N802
+        # Clicking empty space commits the active field and drops focus, so a text
+        # field / combo doesn't stay "stuck" with the caret after you click away.
+        win = self.window()
+        if win is not None:
+            win.makeFirstResponder_(win)
+        objc.super(_FlippedView, self).mouseDown_(event)
+
 
 # macOS keyCodes -> pynput-compatible names for keys that aren't plain characters.
 _KEYCODE_NAMES = {
@@ -354,6 +362,20 @@ class SettingsWindow(NSObject):
             b.widthAnchor().constraintEqualToConstant_(w).setActive_(True)
             return b
 
+        def trig_row(key, *controls):
+            # a trigger row whose label is an on/off checkbox; off = row locked
+            cb = NSButton.checkboxWithTitle_target_action_(T(key), self, "triggerToggled:")
+            cb.widthAnchor().constraintEqualToConstant_(150).setActive_(True)
+            h = NSStackView.alloc().init()
+            h.setOrientation_(NSUserInterfaceLayoutOrientationHorizontal)
+            h.setAlignment_(NSLayoutAttributeCenterY)
+            h.setSpacing_(8)
+            h.addArrangedSubview_(cb)
+            for c in controls:
+                h.addArrangedSubview_(c)
+            stack[0].addArrangedSubview_(h)
+            return cb
+
         # ---- LLM tab (scrollable: base config + up to one rule per prompt) ----
         add_tab("tab_llm", scroll=True)
         header("llm_header")
@@ -457,29 +479,29 @@ class SettingsWindow(NSObject):
         row("voice", self._tts_voice)
         self._prem = button("premium", "downloadPremium:", 290)
         row("", self._prem)
-        # read-aloud trigger: a keyboard row + a mouse row, both live at once
+        # read-aloud trigger: keyboard row + mouse row, each with an on/off checkbox
         stack[0].addArrangedSubview_(label(T("tts_button"), bold=True))
         self._tts_kb = field(w=170)
         self._cap_tts_kb = button("catch", "captureTtsKb:", 100)
-        row("trig_kb", self._tts_kb, self._cap_tts_kb)
+        self._tts_kb_on = trig_row("trig_kb", self._tts_kb, self._cap_tts_kb)
         self._tts_ms_kind = popup(MS_KINDS, w=110)
         self._tts_ms_key = field(w=70)
         self._cap_tts_ms = button("catch", "captureTtsMs:", 100)
-        row("trig_mouse", self._tts_ms_kind, self._tts_ms_key, self._cap_tts_ms)
-        hint("trig_mouse_hint")
+        self._tts_ms_on = trig_row("trig_mouse", self._tts_ms_kind, self._tts_ms_key, self._cap_tts_ms)
+        hint("trig_check_hint")
 
         # ---- Triggers tab ----
         add_tab("tab_triggers")
         header("trig_header")
         self._wheel_kb = field(w=170)
         self._cap_wheel_kb = button("catch", "captureWheelKb:", 100)
-        row("trig_kb", self._wheel_kb, self._cap_wheel_kb)
+        self._wheel_kb_on = trig_row("trig_kb", self._wheel_kb, self._cap_wheel_kb)
         self._wheel_ms_kind = popup(MS_KINDS, w=110)
         self._wheel_ms_key = field(w=70)
         self._cap_wheel_ms = button("catch", "captureWheelMs:", 100)
-        row("trig_mouse", self._wheel_ms_kind, self._wheel_ms_key, self._cap_wheel_ms)
+        self._wheel_ms_on = trig_row("trig_mouse", self._wheel_ms_kind, self._wheel_ms_key, self._cap_wheel_ms)
         hint("trig_hint")
-        hint("trig_mouse_hint")
+        hint("trig_check_hint")
         hint("trig_restart")
         header("misc_header")
         self._concurrent = checkbox("concurrent")
@@ -539,6 +561,8 @@ class SettingsWindow(NSObject):
             (self._uilang_popup, "tip_uilang"),
             (self._cap_wheel_kb, "tip_catch"), (self._cap_wheel_ms, "tip_catch"),
             (self._cap_tts_kb, "tip_catch"), (self._cap_tts_ms, "tip_catch"),
+            (self._wheel_kb_on, "tip_trig_toggle"), (self._wheel_ms_on, "tip_trig_toggle"),
+            (self._tts_kb_on, "tip_trig_toggle"), (self._tts_ms_on, "tip_trig_toggle"),
         )
         for ctl, key in pairs:
             ctl.setToolTip_(t(key))
@@ -579,35 +603,37 @@ class SettingsWindow(NSObject):
     # -- trigger rows (keyboard + mouse, both live; #54) ----------------------
 
     @objc.python_method
-    def _fill_trigger(self, kb_field, ms_kind, ms_key, raw, default_ms_key):
-        """Spread a config 'hotkey' (legacy single or a list) across the two rows:
-        a keyboard binding -> the keyboard field, a mouse binding -> the mouse row."""
+    def _fill_trigger(self, kb_on, kb_field, ms_on, ms_kind, ms_key, raw, default_ms_key):
+        """Spread a config 'hotkey' (legacy single or a list) across the two rows;
+        a present binding ticks that row's on/off checkbox."""
         bindings = _hotkey_bindings(raw)
-        kb_field.setStringValue_("")
-        ms_kind.selectItemWithTitle_("mouse_side")
-        ms_key.setStringValue_("")
-        if not bindings:  # fresh/empty config -> the side-button default
+        kb_field.setStringValue_(""); kb_on.setState_(0)
+        ms_kind.selectItemWithTitle_("mouse_side"); ms_key.setStringValue_(""); ms_on.setState_(0)
+        if not bindings:  # fresh/empty config -> the side-button binding, enabled
+            ms_on.setState_(1)
             ms_key.setStringValue_(default_ms_key)
             return
         for b in bindings:
             kind = str(b.get("kind", ""))
             key = str(b.get("key", ""))
             if kind == "keyboard":
-                kb_field.setStringValue_(key)
+                kb_field.setStringValue_(key); kb_on.setState_(1)
             elif kind in ("mouse_side", "mouse"):
-                ms_kind.selectItemWithTitle_(kind)
-                ms_key.setStringValue_(key)
+                ms_kind.selectItemWithTitle_(kind); ms_key.setStringValue_(key); ms_on.setState_(1)
 
     @objc.python_method
-    def _collect_trigger(self, kb_field, ms_kind, ms_key):
-        """The two rows -> a list of bindings (skip an empty row). Both stay live."""
+    def _collect_trigger(self, kb_on, kb_field, ms_on, ms_kind, ms_key):
+        """The two rows -> a list of bindings. A row contributes only if its checkbox
+        is on and its value is non-empty (an off/locked row is skipped)."""
         out = []
-        combo = str(kb_field.stringValue()).strip()
-        if combo:
-            out.append({"kind": "keyboard", "key": combo})
-        mkey = str(ms_key.stringValue()).strip()
-        if mkey:
-            out.append({"kind": str(ms_kind.titleOfSelectedItem()), "key": mkey})
+        if bool(kb_on.state()):
+            combo = str(kb_field.stringValue()).strip()
+            if combo:
+                out.append({"kind": "keyboard", "key": combo})
+        if bool(ms_on.state()):
+            mkey = str(ms_key.stringValue()).strip()
+            if mkey:
+                out.append({"kind": str(ms_kind.titleOfSelectedItem()), "key": mkey})
         return out
 
     @objc.python_method
@@ -664,13 +690,13 @@ class SettingsWindow(NSObject):
         self._stt_backend.selectItemWithTitle_(stt.get("backend", "auto"))
         self._stt_model.selectItemWithTitle_(str(stt.get("model", "small")))
         self._lang.selectItemWithTitle_(data.get("language", "ru"))
-        self._fill_trigger(self._wheel_kb, self._wheel_ms_kind, self._wheel_ms_key,
-                           data.get("hotkey"), default_ms_key="3")
-        self._fill_trigger(self._tts_kb, self._tts_ms_kind, self._tts_ms_key,
-                           tts.get("hotkey"), default_ms_key="4")
+        self._fill_trigger(self._wheel_kb_on, self._wheel_kb, self._wheel_ms_on,
+                           self._wheel_ms_kind, self._wheel_ms_key, data.get("hotkey"), "3")
+        self._fill_trigger(self._tts_kb_on, self._tts_kb, self._tts_ms_on,
+                           self._tts_ms_kind, self._tts_ms_key, tts.get("hotkey"), "4")
         self._select_voice(tts)
         self._tts_enabled.setState_(1 if tts.get("enabled", True) else 0)
-        self._apply_tts_enabled()
+        self._refresh_trigger_states()
         self._concurrent.setState_(1 if data.get("concurrent", False) else 0)
         for r in list(self._rules):   # clear any existing rule rows
             self._rules_stack.removeView_(r["row"])
@@ -707,12 +733,17 @@ class SettingsWindow(NSObject):
         data["stt"]["model"] = str(self._stt_model.titleOfSelectedItem())
         data["language"] = str(self._lang.titleOfSelectedItem())
         data["hotkey"] = self._collect_trigger(
-            self._wheel_kb, self._wheel_ms_kind, self._wheel_ms_key
+            self._wheel_kb_on, self._wheel_kb, self._wheel_ms_on,
+            self._wheel_ms_kind, self._wheel_ms_key,
         )
+        if not data["hotkey"]:  # never let the wheel become un-triggerable (F1)
+            self._note.setStringValue_(self._t("note_no_trigger"))
+            return
         data.setdefault("tts", {})
         data["tts"]["enabled"] = bool(self._tts_enabled.state())
         data["tts"]["hotkey"] = self._collect_trigger(
-            self._tts_kb, self._tts_ms_kind, self._tts_ms_key
+            self._tts_kb_on, self._tts_kb, self._tts_ms_on,
+            self._tts_ms_kind, self._tts_ms_key,
         )
         backend, piper_voice = self._selected_voice()
         data["tts"]["backend"] = backend
@@ -1058,10 +1089,12 @@ class SettingsWindow(NSObject):
                     str(self._lang.titleOfSelectedItem()))
         if ident == "tab_voice":
             return (int(self._tts_enabled.state()), int(self._tts_voice.indexOfSelectedItem()),
-                    str(self._tts_kb.stringValue()), str(self._tts_ms_kind.titleOfSelectedItem()),
+                    int(self._tts_kb_on.state()), str(self._tts_kb.stringValue()),
+                    int(self._tts_ms_on.state()), str(self._tts_ms_kind.titleOfSelectedItem()),
                     str(self._tts_ms_key.stringValue()))
         if ident == "tab_triggers":
-            return (str(self._wheel_kb.stringValue()), str(self._wheel_ms_kind.titleOfSelectedItem()),
+            return (int(self._wheel_kb_on.state()), str(self._wheel_kb.stringValue()),
+                    int(self._wheel_ms_on.state()), str(self._wheel_ms_kind.titleOfSelectedItem()),
                     str(self._wheel_ms_key.stringValue()), int(self._concurrent.state()))
         if ident == "tab_lang":
             return (int(self._uilang_popup.indexOfSelectedItem()),)
@@ -1100,20 +1133,21 @@ class SettingsWindow(NSObject):
         self._tts_enabled.setState_(1 if d.enabled else 0)
         self._select_voice({"backend": d.backend, "piper_voice": d.piper_voice})
         self._fill_trigger(
-            self._tts_kb, self._tts_ms_kind, self._tts_ms_key,
-            [{"kind": h.kind, "key": h.key} for h in d.hotkeys], default_ms_key="4",
+            self._tts_kb_on, self._tts_kb, self._tts_ms_on, self._tts_ms_kind, self._tts_ms_key,
+            [{"kind": h.kind, "key": h.key} for h in d.hotkeys], "4",
         )
-        self._apply_tts_enabled()
+        self._refresh_trigger_states()
 
     def resetTriggers_(self, _sender):  # noqa: N802
         from ...core.config import HotkeyConfig
 
         d = HotkeyConfig()
         self._fill_trigger(
-            self._wheel_kb, self._wheel_ms_kind, self._wheel_ms_key,
-            [{"kind": d.kind, "key": d.key}], default_ms_key="3",
+            self._wheel_kb_on, self._wheel_kb, self._wheel_ms_on, self._wheel_ms_kind, self._wheel_ms_key,
+            [{"kind": d.kind, "key": d.key}], "3",
         )
         self._concurrent.setState_(0)
+        self._refresh_trigger_states()
 
     def resetLang_(self, _sender):  # noqa: N802
         default = detect_ui_lang()  # back to the system default
@@ -1188,15 +1222,31 @@ class SettingsWindow(NSObject):
         self._set_dirty(True)
 
     @objc.python_method
-    def _apply_tts_enabled(self):
-        """Disable the voice + read-aloud trigger controls when TTS is off."""
-        on = bool(self._tts_enabled.state())
-        for ctl in (self._tts_voice, self._prem, self._tts_kb, self._cap_tts_kb,
-                    self._tts_ms_kind, self._tts_ms_key, self._cap_tts_ms):
-            ctl.setEnabled_(on)
+    def _refresh_trigger_states(self):
+        """Each trigger row's checkbox enables/disables its own controls; an off row
+        is locked. The TTS rows (and voice/premium) are additionally gated on the
+        master 'TTS enabled' checkbox."""
+        tts_on = bool(self._tts_enabled.state())
+        self._tts_voice.setEnabled_(tts_on)
+        self._prem.setEnabled_(tts_on)
+        rows = (
+            (self._wheel_kb_on, (self._wheel_kb, self._cap_wheel_kb), True),
+            (self._wheel_ms_on, (self._wheel_ms_kind, self._wheel_ms_key, self._cap_wheel_ms), True),
+            (self._tts_kb_on, (self._tts_kb, self._cap_tts_kb), tts_on),
+            (self._tts_ms_on, (self._tts_ms_kind, self._tts_ms_key, self._cap_tts_ms), tts_on),
+        )
+        for cb, controls, gate in rows:
+            cb.setEnabled_(gate)
+            enabled = gate and bool(cb.state())
+            for c in controls:
+                c.setEnabled_(enabled)
+
+    def triggerToggled_(self, _sender):  # noqa: N802
+        self._refresh_trigger_states()
+        self._set_dirty(True)
 
     def ttsEnabledChanged_(self, _sender):  # noqa: N802
-        self._apply_tts_enabled()
+        self._refresh_trigger_states()
         self._set_dirty(True)
 
     # -- key capture ("Поймать") ---------------------------------------------
