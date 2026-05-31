@@ -26,10 +26,13 @@ from AppKit import (
     NSColor,
     NSEvent,
     NSEventMaskKeyDown,
+    NSEventMaskOtherMouseDown,
+    NSEventMaskRightMouseDown,
     NSEventModifierFlagCommand,
     NSEventModifierFlagControl,
     NSEventModifierFlagOption,
     NSEventModifierFlagShift,
+    NSEventTypeKeyDown,
     NSFont,
     NSPopUpButton,
     NSTextField,
@@ -75,6 +78,28 @@ def _format_combo(event) -> str | None:
     if not main:
         return None
     return "+".join([*mods, main])
+
+
+def _mouse_kind_key(button_number: int):
+    """A pressed mouse button -> (kind, key) for the config. 1=right, 2=middle, 3+=side."""
+    if button_number == 1:
+        return "mouse", "right"
+    if button_number == 2:
+        return "mouse", "middle"
+    if button_number >= 3:
+        return "mouse_side", str(button_number)
+    return None, None
+
+
+def _capture_kind_key(event):
+    """Decode a captured NSEvent into (kind, key). 'cancel' on Escape; (None, None)
+    if unrecognized (keep waiting)."""
+    if event.type() == NSEventTypeKeyDown:
+        if int(event.keyCode()) == 53:   # Escape -> cancel capture
+            return "cancel", None
+        combo = _format_combo(event)
+        return ("keyboard", combo) if combo else (None, None)
+    return _mouse_kind_key(int(event.buttonNumber()))
 
 # (human label, config value) — the LLM backend picker shows the label, stores the value.
 LLM_BACKENDS = [
@@ -469,26 +494,32 @@ class SettingsWindow(NSObject):
 
     @objc.python_method
     def _begin_capture(self, kind_popup, key_field, button):
-        """Catch the next keystroke and write it into the trigger fields."""
+        """Catch the next key/combo OR mouse button and write it into the trigger
+        fields. (A side button already bound to a trigger is swallowed by our event
+        tap and can't be caught here — press Esc to cancel and type it instead.)"""
         if self._capture_monitor is not None:
             return  # already catching
         old_title = str(button.title())
         button.setTitle_("нажми…")
+        self._note.setStringValue_("Нажми клавишу/комбо или кнопку мыши (Esc — отмена)…")
+        mask = NSEventMaskKeyDown | NSEventMaskOtherMouseDown | NSEventMaskRightMouseDown
 
         def handler(event):
-            combo = _format_combo(event)
-            if combo:
-                kind_popup.selectItemWithTitle_("keyboard")
-                key_field.setStringValue_(combo)
-                self._note.setStringValue_(f"Поймал: {combo}. Нажми «Сохранить».")
+            kind, key = _capture_kind_key(event)
+            if kind is None:
+                return None  # unrecognized — keep waiting
+            if kind != "cancel":
+                kind_popup.selectItemWithTitle_(kind)
+                key_field.setStringValue_(key)
+                self._note.setStringValue_(f"Поймал: {kind} / {key}. Нажми «Сохранить».")
             if self._capture_monitor is not None:
                 NSEvent.removeMonitor_(self._capture_monitor)
                 self._capture_monitor = None
             button.setTitle_(old_title)
-            return None  # swallow the keystroke so it doesn't type into a field
+            return None  # swallow so the press doesn't hit a control
 
         self._capture_monitor = NSEvent.addLocalMonitorForEventsMatchingMask_handler_(
-            NSEventMaskKeyDown, handler
+            mask, handler
         )
 
     def ttsVoiceChanged_(self, _sender):  # noqa: N802
