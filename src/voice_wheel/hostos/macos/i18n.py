@@ -177,6 +177,56 @@ STR = {
     "menu_settings": ("Настройки…", "Settings…"),
     "menu_quit": ("Выход", "Quit"),
     "menu_empty": ("(пусто)", "(empty)"),
+    # tooltips (#41) — short hover hints on the key controls
+    "tip_conn_api": (
+        "Облако по ключу: быстро и качественно, но платно и нужен интернет.",
+        "Cloud by key: fast and high-quality, but paid and needs internet.",
+    ),
+    "tip_conn_ollama": (
+        "Локально через Ollama: бесплатно и офлайн, нужна установленная Ollama.",
+        "Local via Ollama: free and offline, needs Ollama installed.",
+    ),
+    "tip_conn_cc": (
+        "Через claude CLI на подписке Max, без API-ключа.",
+        "Via the claude CLI on the Max plan, no API key.",
+    ),
+    "tip_provider": (
+        "Облачный провайдер: Anthropic (Claude) или OpenAI (GPT).",
+        "Cloud provider: Anthropic (Claude) or OpenAI (GPT).",
+    ),
+    "tip_api_key": (
+        "Ключ провайдера. Хранится в .env, применяется сразу.",
+        "The provider's key. Stored in .env, applies immediately.",
+    ),
+    "tip_model": (
+        "Конкретная модель: выбери рекомендацию или впиши свою.",
+        "The specific model: pick a recommendation or type your own.",
+    ),
+    "tip_ollama_url": ("Адрес локального Ollama. Обычно не трогаем.", "Local Ollama address. Usually left as-is."),
+    "tip_download": ("Скачать выбранную модель (ollama pull) в фоне.", "Download the selected model (ollama pull) in the background."),
+    "tip_stt_backend": ("Чем распознаём речь. auto — оптимально под железо.", "The recognizer. auto picks the best for your hardware."),
+    "tip_stt_model": ("Точность ↔ скорость. small — оптимум для русского.", "Accuracy ↔ speed. small is the Russian sweet spot."),
+    "tip_stt_lang": ("Язык распознавания. auto — определять по речи.", "Recognition language. auto detects it from speech."),
+    "tip_tts_enabled": ("Озвучивать выделенный текст / буфер по кнопке.", "Read the selection / clipboard aloud on the button."),
+    "tip_tts_voice": ("Голос озвучки: Piper — локальный нейро, macOS — системный.", "TTS voice: Piper is local neural, macOS is the system voice."),
+    "tip_premium": ("Открыть macOS, чтобы скачать премиум-голос.", "Open macOS to download a premium voice."),
+    "tip_tts_trigger": ("Клавиша/кнопка, чтобы озвучить выделенное.", "Key/button to read the selection aloud."),
+    "tip_wheel_trigger": (
+        "Клавиша/кнопка, чтобы открыть колесо и начать запись.",
+        "Key/button to open the wheel and start recording.",
+    ),
+    "tip_catch": (
+        "Нажми, затем нужную клавишу/кнопку — поймаю автоматически.",
+        "Click, then press the key/button you want — it's captured automatically.",
+    ),
+    "tip_concurrent": (
+        "Разрешить новую запись, пока прошлая обрабатывается.",
+        "Allow a new recording while the previous one is still processing.",
+    ),
+    "tip_uilang": (
+        "Язык интерфейса. Применяется при «Сохранить» (перезапуск).",
+        "Interface language. Applies on «Save» (restart).",
+    ),
     # console
     "ready_msg": (
         "Voice Wheel готов. Зажми {}, говори, отпусти. "
