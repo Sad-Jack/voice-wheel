@@ -68,9 +68,15 @@ STR = {
     # Triggers tab
     "trig_header": ("⌨️ Триггер записи (колесо)", "⌨️ Record trigger (wheel)"),
     "trig_button": ("Кнопка", "Button"),
+    "trig_kb": ("Клавиатура", "Keyboard"),
+    "trig_mouse": ("Мышь", "Mouse"),
     "trig_hint": (
-        "вид + кнопка/клавиша, или «Поймать» → нажми нужную (комбо вроде ⌘F тоже).",
-        "type + button/key, or «Catch» → press the one you want (combos like ⌘F too).",
+        "Обе строки работают одновременно. «Поймать» → нажми нужную клавишу/комбо или кнопку мыши.",
+        "Both rows are live at once. «Catch» → press the key/combo or mouse button you want.",
+    ),
+    "trig_mouse_hint": (
+        "Мышь можно оставить пустой, если её нет — хватит клавиатуры.",
+        "Leave the mouse row empty if you have no mouse — the keyboard is enough.",
     ),
     "trig_restart": (
         "⏱ Триггеры применяются после перезапуска приложения.",
@@ -130,9 +136,9 @@ STR = {
     "menu_empty": ("(пусто)", "(empty)"),
     # console
     "ready_msg": (
-        "Voice Wheel готов. Зажми {}:{}, говори, отпусти. "
+        "Voice Wheel готов. Зажми {}, говори, отпусти. "
         "Центр = текст, сектор = стиль. Ctrl+C для выхода.",
-        "Voice Wheel ready. Hold {}:{}, speak, release. "
+        "Voice Wheel ready. Hold {}, speak, release. "
         "Center = text, sector = style. Ctrl+C to quit.",
     ),
 }

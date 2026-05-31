@@ -128,9 +128,11 @@ class VoiceWheel(NSObject):
 
     def start(self):
         self._menubar.set_ready(False)  # red until warm-up completes and the trigger is up
-        triggers = [(self._config.hotkey, "onPress:", "onRelease:")]
+        # Each trigger can have several bindings (e.g. a mouse button AND a keyboard
+        # combo) — all live at once. Expand them into individual (hotkey, sel) entries.
+        triggers = [(hk, "onPress:", "onRelease:") for hk in self._config.hotkeys]
         if self._config.tts.enabled and self._speaker is not None:
-            triggers.append((self._config.tts.hotkey, "onTts:", None))
+            triggers += [(hk, "onTts:", None) for hk in self._config.tts.hotkeys]
         self._triggers_ok = self._triggers.start(triggers)
         if not self._triggers_ok:
             print("⚠️  Нет доступа Accessibility — триггер не сработает (см. выше).", flush=True)
@@ -142,12 +144,9 @@ class VoiceWheel(NSObject):
         NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
             1.0, self, "heartbeat:", None, True
         )
-        print(
-            _tr("ready_msg", self._lang).format(
-                self._config.hotkey.kind, self._config.hotkey.key
-            ),
-            flush=True,
-        )
+        hk = self._config.hotkeys[0] if self._config.hotkeys else None
+        trigger_desc = f"{hk.kind}:{hk.key}" if hk else "—"
+        print(_tr("ready_msg", self._lang).format(trigger_desc), flush=True)
 
     def heartbeat_(self, _timer):  # noqa: N802
         try:
