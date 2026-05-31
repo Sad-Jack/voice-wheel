@@ -58,6 +58,7 @@ class TTSConfig:
 class Config:
     hotkey: HotkeyConfig = field(default_factory=HotkeyConfig)
     language: str = "ru"  # mutable at runtime via the tray toggle
+    ui_language: str = ""  # interface language 'ru'|'en'; "" = follow the system locale
     stt: STTConfig = field(default_factory=STTConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
     tts: TTSConfig = field(default_factory=TTSConfig)
@@ -81,6 +82,7 @@ class Config:
         return cls(
             hotkey=HotkeyConfig(**_pick(raw.get("hotkey"), HotkeyConfig)),
             language=raw.get("language", "ru"),
+            ui_language=str(raw.get("ui_language", "")),
             stt=STTConfig(**_pick(raw.get("stt"), STTConfig)),
             llm=LLMConfig(**_pick(raw.get("llm"), LLMConfig)),
             tts=_parse_tts(raw.get("tts")),

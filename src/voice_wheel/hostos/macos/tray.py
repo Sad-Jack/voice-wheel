@@ -25,6 +25,8 @@ from AppKit import (
 )
 from Foundation import NSObject
 
+from .i18n import t
+
 
 def _elide(text: str, length: int = 52) -> str:
     flat = " ".join((text or "").split())
@@ -32,10 +34,11 @@ def _elide(text: str, length: int = 52) -> str:
 
 
 class MenuBar(NSObject):
-    def init(self):
+    def initWithLang_(self, lang):  # noqa: N802
         self = objc.super(MenuBar, self).init()
         if self is None:
             return None
+        self._lang = lang
         self._reuse = None
         self._settings = None
 
@@ -55,7 +58,7 @@ class MenuBar(NSObject):
 
         menu = NSMenu.alloc().init()
         self._history_mi = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-            "История", None, ""
+            t("menu_history", self._lang), None, ""
         )
         self._history_menu = NSMenu.alloc().init()
         self._history_mi.setSubmenu_(self._history_menu)
@@ -63,14 +66,14 @@ class MenuBar(NSObject):
         self._refresh_history_menu([])
 
         settings_mi = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-            "Настройки…", "settingsClicked:", ","
+            t("menu_settings", self._lang), "settingsClicked:", ","
         )
         settings_mi.setTarget_(self)
         menu.addItem_(settings_mi)
 
         menu.addItem_(NSMenuItem.separatorItem())
         quit_mi = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-            "Выход", "quitApp:", "q"
+            t("menu_quit", self._lang), "quitApp:", "q"
         )
         quit_mi.setTarget_(self)
         menu.addItem_(quit_mi)
@@ -100,7 +103,9 @@ class MenuBar(NSObject):
     def _refresh_history_menu(self, entries):
         self._history_menu.removeAllItems()
         if not entries:
-            empty = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("(пусто)", None, "")
+            empty = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+                t("menu_empty", self._lang), None, ""
+            )
             empty.setEnabled_(False)
             self._history_menu.addItem_(empty)
             return
