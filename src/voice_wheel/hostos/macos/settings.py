@@ -46,6 +46,7 @@ from AppKit import (
     NSLayoutAttributeLeading,
     NSLayoutConstraint,
     NSPopUpButton,
+    NSScrollView,
     NSStackView,
     NSTabView,
     NSTabViewItem,
@@ -231,21 +232,40 @@ class SettingsWindow(NSObject):
 
         stack = [None]   # the current tab's vertical NSStackView (Auto-Layout, auto-aligns)
 
-        def add_tab(key):
-            container = _FlippedView.alloc().initWithFrame_(NSMakeRect(0, 0, W - 28, H - 96))
+        def add_tab(key, scroll=False):
+            tab_w, tab_h = W - 28, H - 96
             v = NSStackView.alloc().init()
             v.setOrientation_(NSUserInterfaceLayoutOrientationVertical)
             v.setAlignment_(NSLayoutAttributeLeading)
             v.setSpacing_(8)
             v.setTranslatesAutoresizingMaskIntoConstraints_(False)
-            container.addSubview_(v)
-            NSLayoutConstraint.activateConstraints_([
-                v.topAnchor().constraintEqualToAnchor_constant_(container.topAnchor(), 16),
-                v.leadingAnchor().constraintEqualToAnchor_constant_(container.leadingAnchor(), 18),
-            ])
+            doc = _FlippedView.alloc().initWithFrame_(NSMakeRect(0, 0, tab_w, tab_h))
+            doc.addSubview_(v)
+            cons = [
+                v.topAnchor().constraintEqualToAnchor_constant_(doc.topAnchor(), 16),
+                v.leadingAnchor().constraintEqualToAnchor_constant_(doc.leadingAnchor(), 18),
+            ]
+            if scroll:
+                # The document view grows with its content; the scroll view shows a
+                # vertical scroller only when it overflows the tab (autohide).
+                doc.setTranslatesAutoresizingMaskIntoConstraints_(False)
+                sv = NSScrollView.alloc().initWithFrame_(NSMakeRect(0, 0, tab_w, tab_h))
+                sv.setHasVerticalScroller_(True)
+                sv.setHasHorizontalScroller_(False)
+                sv.setDrawsBackground_(False)
+                sv.setAutohidesScrollers_(True)
+                sv.setDocumentView_(doc)
+                cons += [
+                    doc.widthAnchor().constraintEqualToAnchor_(sv.contentView().widthAnchor()),
+                    doc.bottomAnchor().constraintEqualToAnchor_constant_(v.bottomAnchor(), 16),
+                ]
+                view = sv
+            else:
+                view = doc
+            NSLayoutConstraint.activateConstraints_(cons)
             item = NSTabViewItem.alloc().initWithIdentifier_(key)
             item.setLabel_(T(key))
-            item.setView_(container)
+            item.setView_(view)
             tabs.addTabViewItem_(item)
             stack[0] = v
 
@@ -294,8 +314,8 @@ class SettingsWindow(NSObject):
             b.widthAnchor().constraintEqualToConstant_(w).setActive_(True)
             return b
 
-        # ---- LLM tab ----
-        add_tab("tab_llm")
+        # ---- LLM tab (scrollable: base config + up to one rule per prompt) ----
+        add_tab("tab_llm", scroll=True)
         header("llm_header")
         self._backend = popup(self._backend_labels())
         self._backend.setTarget_(self)
