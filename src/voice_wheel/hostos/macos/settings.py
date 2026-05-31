@@ -45,6 +45,8 @@ from AppKit import (
     NSLayoutAttributeCenterY,
     NSLayoutAttributeLeading,
     NSLayoutConstraint,
+    NSLineBreakByTruncatingTail,
+    NSLineBreakByWordWrapping,
     NSPopUpButton,
     NSScrollView,
     NSStackView,
@@ -283,7 +285,16 @@ class SettingsWindow(NSObject):
             stack[0].addArrangedSubview_(label(T(key), bold=True))
 
         def hint(key):
-            stack[0].addArrangedSubview_(label(T(key), gray=True))
+            # Wrap long explanatory text within the tab instead of letting the
+            # single-line label run off the right edge (container W-28, leading 18).
+            wrap_w = W - 68
+            lab = label(T(key), gray=True)
+            lab.setUsesSingleLineMode_(False)
+            lab.setLineBreakMode_(NSLineBreakByWordWrapping)
+            lab.setMaximumNumberOfLines_(0)
+            lab.setPreferredMaxLayoutWidth_(wrap_w)
+            lab.widthAnchor().constraintLessThanOrEqualToConstant_(wrap_w).setActive_(True)
+            stack[0].addArrangedSubview_(lab)
 
         def row(label_key, *controls):
             h = NSStackView.alloc().init()
@@ -414,6 +425,7 @@ class SettingsWindow(NSObject):
         self._note.setFrame_(NSMakeRect(120, 15, W - 260, 18))
         self._note.setFont_(NSFont.systemFontOfSize_(11))
         self._note.setTextColor_(NSColor.secondaryLabelColor())
+        self._note.setLineBreakMode_(NSLineBreakByTruncatingTail)  # «…» instead of clipping
         root.addSubview_(self._note)
 
         self._save_btn = NSButton.buttonWithTitle_target_action_(T("save"), self, "save:")
