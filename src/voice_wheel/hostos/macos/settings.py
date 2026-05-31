@@ -218,6 +218,7 @@ class SettingsWindow(NSObject):
             self._save_btn = None
             self._tabs = None
             self._baseline = None         # form snapshot at load -> Save = (form != baseline)
+            self._restart_warn = None     # always-visible "saving will restart" label
             self._last_provider = "Anthropic"   # for per-provider model memory (#F2)
             self._model_by_provider = {}
             self._pull_result = None      # (ok, model) handoff from the ollama-pull thread
@@ -276,14 +277,14 @@ class SettingsWindow(NSObject):
         win.setDelegate_(self)
         root = win.contentView()
 
-        tabs = NSTabView.alloc().initWithFrame_(NSMakeRect(10, 48, W - 20, H - 58))
+        tabs = NSTabView.alloc().initWithFrame_(NSMakeRect(10, 70, W - 20, H - 80))
         root.addSubview_(tabs)
         self._tabs = tabs
 
         stack = [None]   # the current tab's vertical NSStackView (Auto-Layout, auto-aligns)
 
         def add_tab(key, scroll=False):
-            tab_w, tab_h = W - 28, H - 96
+            tab_w, tab_h = W - 28, H - 118
             v = NSStackView.alloc().init()
             v.setOrientation_(NSUserInterfaceLayoutOrientationVertical)
             v.setAlignment_(NSLayoutAttributeLeading)
@@ -490,7 +491,6 @@ class SettingsWindow(NSObject):
         self._lang = popup(LANGS)
         row("language", self._lang)
         hint("stt_lang_hint")
-        hint("stt_restart")
 
         # ---- Voice (TTS) tab ----
         add_tab("tab_voice")
@@ -528,7 +528,6 @@ class SettingsWindow(NSObject):
         self._wheel_ms_on = trig_row("trig_mouse", self._wheel_ms, self._cap_wheel_ms)
         hint("trig_hint")
         hint("trig_check_hint")
-        hint("trig_restart")
         header("misc_header")
         self._concurrent = checkbox("concurrent")
         stack[0].addArrangedSubview_(self._concurrent)
@@ -540,7 +539,16 @@ class SettingsWindow(NSObject):
         self._uilang_popup.selectItemAtIndex_(0 if self._uilang == "ru" else 1)
         stack[0].addArrangedSubview_(self._uilang_popup)
         hint("lang_hint")
-        hint("lang_restart_warn")
+
+        # ---- always-visible restart warning (above the bottom bar), shown only when
+        #      the pending unsaved changes actually require a restart ----
+        self._restart_warn = NSTextField.labelWithString_(T("restart_warn_global"))
+        self._restart_warn.setFrame_(NSMakeRect(16, 46, W - 32, 18))
+        self._restart_warn.setFont_(NSFont.systemFontOfSize_(11))
+        self._restart_warn.setTextColor_(NSColor.systemOrangeColor())
+        self._restart_warn.setLineBreakMode_(NSLineBreakByTruncatingTail)
+        self._restart_warn.setHidden_(True)
+        root.addSubview_(self._restart_warn)
 
         # ---- bottom bar: Reset (left) · note · Save (right) ----
         reset_btn = NSButton.buttonWithTitle_target_action_(
@@ -631,12 +639,41 @@ class SettingsWindow(NSObject):
         """Remember the current form as the 'saved' state; Save goes disabled."""
         self._baseline = self._full_snapshot()
         self._set_dirty(False)
+        self._update_restart_warn()
 
     @objc.python_method
     def _recompute_dirty(self):
         """Save reflects whether the form actually differs from the saved state, so
         reverting a change (or a reset that lands back on the saved values) disarms it."""
         self._set_dirty(self._full_snapshot() != self._baseline)
+        self._update_restart_warn()
+
+    @objc.python_method
+    def _restart_pending(self):
+        """Would saving NOW restart the app? (language / triggers / STT changed vs
+        the saved config). Mirrors the needs_restart logic in save_."""
+        old = self._read()
+        old_lang = resolve_lang(old.get("ui_language"))
+        new_lang = "ru" if int(self._uilang_popup.indexOfSelectedItem()) == 0 else "en"
+        new_wheel = self._collect_trigger(
+            self._wheel_kb_on, self._wheel_kb, self._wheel_ms_on,
+            self._wheel_ms, self._wheel_ms_map,
+        )
+        new_tts = self._collect_trigger(
+            self._tts_kb_on, self._tts_kb, self._tts_ms_on, self._tts_ms, self._tts_ms_map,
+        )
+        return (
+            new_lang != old_lang
+            or self._trigger_sig(old.get("hotkey")) != self._trigger_sig(new_wheel)
+            or self._trigger_sig(old.get("tts", {}).get("hotkey")) != self._trigger_sig(new_tts)
+            or str(old.get("stt", {}).get("backend", "auto")) != str(self._stt_backend.titleOfSelectedItem())
+            or str(old.get("stt", {}).get("model", "small")) != str(self._stt_model.titleOfSelectedItem())
+        )
+
+    @objc.python_method
+    def _update_restart_warn(self):
+        if self._restart_warn is not None:
+            self._restart_warn.setHidden_(not (self._dirty and self._restart_pending()))
 
     def markDirty_(self, _sender):  # noqa: N802
         self._recompute_dirty()

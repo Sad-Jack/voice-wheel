@@ -166,6 +166,10 @@ STR = {
         "⚠️ После «Сохранить» приложение перезапустится, чтобы сменить язык.",
         "⚠️ After «Save» the app will restart to change the language.",
     ),
+    "restart_warn_global": (
+        "⚠️ Несохранённые изменения (язык / триггеры / STT) перезапустят приложение при «Сохранить».",
+        "⚠️ Unsaved changes (language / triggers / STT) will restart the app on «Save».",
+    ),
     # buttons / runtime notes
     "catch": ("Поймать", "Catch"),
     "catching": ("нажми…", "press…"),
