@@ -188,9 +188,14 @@ class SettingsWindow(NSObject):
             "key": str(self._tts_key.stringValue()),
         }
         data["concurrent"] = bool(self._concurrent.state())
-        self._path().write_text(
-            json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
+        try:
+            self._path().write_text(
+                json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+        except OSError as exc:  # disk/permissions — tell the user, don't throw into ObjC
+            log.warning("could not write %s: %s", self._path(), exc)
+            self._note.setStringValue_(f"⚠️ Не удалось сохранить: {exc}")
+            return
         self._note.setStringValue_("Сохранено. Перезапусти приложение (меню-бар → Выход, затем ./run.sh).")
 
     def windowWillClose_(self, _notif):  # noqa: N802

@@ -98,6 +98,7 @@ class PulseOverlay:
     def __init__(self) -> None:
         self._panel = None
         self._view = None
+        self._timer = None
 
     def _ensure(self) -> None:
         if self._panel is not None:
@@ -117,7 +118,11 @@ class PulseOverlay:
         self._view.progress = 0.0
         self._panel.orderFrontRegardless()
         self._view.setNeedsDisplay_(True)
-        NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
+        # Cancel any still-running ping so two timers don't drive the same view
+        # (would double the animation speed and hide it early under rapid completions).
+        if self._timer is not None:
+            self._timer.invalidate()
+        self._timer = NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
             1.0 / 60.0, self._view, "onStep:", None, True
         )
 

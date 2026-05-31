@@ -45,6 +45,8 @@ from .wheel_overlay import WheelOverlay
 
 log = logging.getLogger(__name__)
 
+MIN_RECORDING_SEC = 0.35  # shorter than this = an accidental tap, not a real request
+
 
 class VoiceWheel(NSObject):
     # -- construction ---------------------------------------------------------
@@ -183,13 +185,21 @@ class VoiceWheel(NSObject):
         gen = self._jobs.generation
         ring, sector = self._wheel.selection()
         self._wheel.hide()
-        audio = trim_silence(self._recorder.stop())
+        raw = self._recorder.stop()
         if ring == "cancel":
             # Cursor left the wheel — discard everything, process nothing.
             self._llm.discard_prewarm()
             self._menubar.setStatus_("Voice Wheel — отменено")
             print("✕ отменено (курсор за колесом)", flush=True)
             return
+        if raw.size < MIN_RECORDING_SEC * self._recorder.sample_rate:
+            # An accidental tap (press+release with no real speech) — skip quietly
+            # instead of spinning up STT and flashing a scary red "empty" ping.
+            self._llm.discard_prewarm()
+            self._menubar.setStatus_("Voice Wheel — слишком коротко")
+            print("· слишком коротко — пропускаю", flush=True)
+            return
+        audio = trim_silence(raw)
         print(f"○ стоп → обработка ({ring}/{sector or 'центр'})…", flush=True)
         self._menubar.setStatus_("обработка…")
         self._jobs.begin()
