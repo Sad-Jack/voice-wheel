@@ -16,11 +16,6 @@
     "max_tokens": 1024,
     "_comment": "ANTHROPIC_API_KEY must be set in the environment."
   },
-  "default_mode": {
-    "ring": "transform",
-    "sector": "clean",
-    "_comment": "Used before the radial wheel (Phase D) exists. ring: dictate|transform|context. sector: clean|short|friendly|tech."
-  },
   "max_context_chars": 6000,
   "auto_paste": false,
   "history_limit": 10

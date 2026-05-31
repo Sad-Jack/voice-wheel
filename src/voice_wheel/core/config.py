@@ -46,12 +46,6 @@ class LLMConfig:
 
 
 @dataclass(frozen=True)
-class DefaultMode:
-    ring: str = "transform"  # 'dictate' | 'transform' | 'context'
-    sector: str = "normalize"  # 'normalize' | 'formal' | 'short' | 'friendly'
-
-
-@dataclass(frozen=True)
 class TTSConfig:
     enabled: bool = True
     backend: str = "piper"  # "piper" (local neural, auto-downloaded) | "system" (macOS voices)
@@ -66,7 +60,6 @@ class Config:
     language: str = "ru"  # mutable at runtime via the tray toggle
     stt: STTConfig = field(default_factory=STTConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
-    default_mode: DefaultMode = field(default_factory=DefaultMode)
     tts: TTSConfig = field(default_factory=TTSConfig)
     sector_models: dict = field(default_factory=dict)  # sector_key -> {backend, model}
     concurrent: bool = False  # allow recording a new one while a previous is processing
@@ -90,7 +83,6 @@ class Config:
             language=raw.get("language", "ru"),
             stt=STTConfig(**_pick(raw.get("stt"), STTConfig)),
             llm=LLMConfig(**_pick(raw.get("llm"), LLMConfig)),
-            default_mode=DefaultMode(**_pick(raw.get("default_mode"), DefaultMode)),
             tts=_parse_tts(raw.get("tts")),
             sector_models=_parse_sector_models(raw.get("sector_models")),
             concurrent=bool(raw.get("concurrent", False)),
