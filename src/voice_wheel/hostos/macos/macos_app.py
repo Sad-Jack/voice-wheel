@@ -396,6 +396,18 @@ class VoiceWheel(NSObject):
             log.debug("cleanup (audio): %s", exc)
 
     @objc.python_method
+    def _cleanup_on_quit(self):
+        """Teardown for an actual quit (menu Quit / Ctrl+C / crash): everything
+        _cleanup does, plus unloading the local ollama model so nothing stays
+        loaded in RAM/VRAM after we exit. A self-restart (_restart) deliberately
+        keeps the model warm, so it calls _cleanup directly and skips this."""
+        self._cleanup()
+        try:
+            self._llm.unload()
+        except Exception as exc:  # noqa: BLE001
+            log.debug("cleanup (ollama unload): %s", exc)
+
+    @objc.python_method
     def _onboarding_alert(self):
         from AppKit import NSAlert
 
@@ -466,7 +478,7 @@ class VoiceWheel(NSObject):
             os._exit(1)
 
     def applicationWillTerminate_(self, _notif):  # noqa: N802
-        self._cleanup()
+        self._cleanup_on_quit()
 
 
 def _ensure_accessibility(allow_prompt: bool = True) -> bool:
@@ -564,8 +576,8 @@ def main() -> None:
     _ensure_accessibility(allow_prompt=not restarted)
     config = Config.load()
     controller = VoiceWheel.alloc().initWithConfig_(config)
-    app.setDelegate_(controller)            # applicationWillTerminate_ -> cleanup (menu Quit)
-    atexit.register(controller._cleanup)    # normal interpreter exit / unhandled crash
+    app.setDelegate_(controller)               # applicationWillTerminate_ -> quit cleanup (menu Quit)
+    atexit.register(controller._cleanup_on_quit)  # normal interpreter exit / unhandled crash / Ctrl+C
     controller.start()
     AppHelper.runEventLoop()
 

@@ -198,6 +198,27 @@ class LLMClient:
         resp.raise_for_status()
         return str(resp.json().get("message", {}).get("content", "")).strip()
 
+    def unload(self) -> None:
+        """Drop the local ollama model from RAM/VRAM so nothing stays loaded after
+        we quit. Requests pin the model for 30m (avoids reload stalls between
+        recordings); this releases it on demand (``keep_alive: 0`` with no prompt
+        just unloads). No-op unless ollama is the active backend; best-effort and
+        quick so it never blocks shutdown. The ``ollama serve`` daemon is left
+        running — it's the user's service, not ours to stop."""
+        if self._backend != "ollama":
+            return
+        try:
+            import requests
+
+            requests.post(
+                f"{self._cfg.ollama_url}/api/generate",
+                json={"model": self._cfg.ollama_model, "keep_alive": 0},
+                timeout=(2, 5),
+            )
+            log.info("ollama model %s unloaded on exit", self._cfg.ollama_model)
+        except Exception as exc:  # noqa: BLE001 - best effort; never block shutdown
+            log.debug("ollama unload skipped: %s", exc)
+
     # -- anthropic backend ----------------------------------------------------
 
     def _complete_api(self, system: str, user: str, model: str | None = None) -> str:
