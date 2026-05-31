@@ -54,6 +54,17 @@ STR = {
         "A local model via Ollama — it must be installed and running (ollama serve). "
         "The URL is usually left as-is.",
     ),
+    "ollama_checking": ("Проверяю Ollama…", "Checking Ollama…"),
+    "ollama_running": ("✅ Ollama запущена", "✅ Ollama is running"),
+    "ollama_not_running": (
+        "⚠️ Ollama установлена, но не запущена",
+        "⚠️ Ollama is installed but not running",
+    ),
+    "ollama_not_installed": ("❌ Ollama не установлена", "❌ Ollama is not installed"),
+    "ollama_install_btn": ("Установить Ollama…", "Install Ollama…"),
+    "ollama_start_btn": ("Запустить Ollama", "Start Ollama"),
+    "ollama_recheck_btn": ("Проверить", "Re-check"),
+    "ollama_starting": ("Запускаю Ollama…", "Starting Ollama…"),
     "cc_hint": (
         "Через установленный claude CLI на подписке Max (без ключа). "
         "Установи Claude Code и выполни claude login.",

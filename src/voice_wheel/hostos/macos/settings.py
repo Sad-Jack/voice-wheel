@@ -397,6 +397,18 @@ class SettingsWindow(NSObject):
         self._ollama_url = field()
         row("ollama_url", self._ollama_url)
         hint("ollama_hint")
+        # status (#40): checked in the background; shows installed/running + an action
+        self._ollama_state = None
+        self._ollama_status = label("", gray=True)
+        stack[0].addArrangedSubview_(self._ollama_status)
+        self._ollama_action = NSButton.buttonWithTitle_target_action_("", self, "ollamaAction:")
+        self._ollama_action.widthAnchor().constraintEqualToConstant_(200).setActive_(True)
+        status_btns = NSStackView.alloc().init()
+        status_btns.setOrientation_(NSUserInterfaceLayoutOrientationHorizontal)
+        status_btns.setSpacing_(8)
+        status_btns.addArrangedSubview_(self._ollama_action)
+        status_btns.addArrangedSubview_(button("ollama_recheck_btn", "recheckOllama:", 120))
+        stack[0].addArrangedSubview_(status_btns)
         stack[0] = prev
 
         # -- Claude Code group: model --
@@ -621,6 +633,8 @@ class SettingsWindow(NSObject):
         self._ollama_url.setStringValue_(str(llm.get("ollama_url", "http://localhost:11434")))
         self._api_key.setStringValue_(self._read_env().get(self._provider_env_var(), ""))
         self._apply_conn_visibility()
+        if ctype == "ollama":
+            self._start_ollama_check()
         stt = data.get("stt", {})
         self._stt_backend.selectItemWithTitle_(stt.get("backend", "auto"))
         self._stt_model.selectItemWithTitle_(str(stt.get("model", "small")))
@@ -784,6 +798,8 @@ class SettingsWindow(NSObject):
         for rb, _ in self._conn_radios:
             rb.setState_(1 if rb == sender else 0)
         self._apply_conn_visibility()
+        if self._selected_conn_type() == "ollama":
+            self._start_ollama_check()
         self._set_dirty(True)
 
     @objc.python_method
@@ -837,6 +853,83 @@ class SettingsWindow(NSObject):
                     for i in range(self._ollama.numberOfItems())]
             if model not in have:
                 self._ollama.addItemWithObjectValue_(model)
+
+    # -- Ollama install / running status (#40) --------------------------------
+
+    def recheckOllama_(self, _sender):  # noqa: N802
+        self._start_ollama_check()
+
+    @objc.python_method
+    def _start_ollama_check(self):
+        """Probe (in the background) whether Ollama is installed and running, then
+        reflect it in the status line + the context action button."""
+        self._ollama_status.setStringValue_(self._t("ollama_checking"))
+        self._ollama_status.setTextColor_(NSColor.secondaryLabelColor())
+        url = str(self._ollama_url.stringValue()).strip() or "http://localhost:11434"
+        threading.Thread(target=self._check_ollama, args=(url,), daemon=True).start()
+
+    @objc.python_method
+    def _check_ollama(self, url):
+        import os
+        import shutil
+
+        installed = shutil.which("ollama") is not None or any(
+            os.path.exists(p) for p in ("/usr/local/bin/ollama", "/opt/homebrew/bin/ollama")
+        )
+        running = False
+        try:
+            import requests
+
+            requests.get(f"{url}/api/tags", timeout=1.5)
+            running = True
+        except Exception:  # noqa: BLE001 - any failure = not reachable
+            running = False
+        self._ollama_state = "running" if running else ("not_running" if installed else "not_installed")
+        self.performSelectorOnMainThread_withObject_waitUntilDone_("ollamaStatusUpdated:", None, False)
+
+    def ollamaStatusUpdated_(self, _arg):  # noqa: N802
+        text_key, color = {
+            "running": ("ollama_running", NSColor.systemGreenColor()),
+            "not_running": ("ollama_not_running", NSColor.systemOrangeColor()),
+            "not_installed": ("ollama_not_installed", NSColor.systemRedColor()),
+        }.get(self._ollama_state, ("ollama_checking", NSColor.secondaryLabelColor()))
+        self._ollama_status.setStringValue_(self._t(text_key))
+        self._ollama_status.setTextColor_(color)
+        if self._ollama_state == "not_installed":
+            self._ollama_action.setTitle_(self._t("ollama_install_btn"))
+            self._ollama_action.setHidden_(False)
+        elif self._ollama_state == "not_running":
+            self._ollama_action.setTitle_(self._t("ollama_start_btn"))
+            self._ollama_action.setHidden_(False)
+        else:
+            self._ollama_action.setHidden_(True)
+
+    def ollamaAction_(self, _sender):  # noqa: N802
+        if self._ollama_state == "not_installed":
+            from AppKit import NSWorkspace
+            from Foundation import NSURL
+
+            NSWorkspace.sharedWorkspace().openURL_(
+                NSURL.URLWithString_("https://ollama.com/download")
+            )
+        elif self._ollama_state == "not_running":
+            self._note.setStringValue_(self._t("ollama_starting"))
+            threading.Thread(target=self._start_ollama_serve, daemon=True).start()
+
+    @objc.python_method
+    def _start_ollama_serve(self):
+        import subprocess
+        import time
+
+        try:
+            subprocess.Popen(
+                ["ollama", "serve"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True,
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.warning("ollama serve failed: %s", exc)
+        time.sleep(2.0)  # let it bind the port, then re-check on the main thread
+        self.performSelectorOnMainThread_withObject_waitUntilDone_("recheckOllama:", None, False)
 
     # -- API key storage in .env (#38) ----------------------------------------
 
