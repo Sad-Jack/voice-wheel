@@ -26,6 +26,7 @@ fi
 
 # --- supervised run: auto-restart on crash or freeze (heartbeat watchdog, #48) ---
 HEARTBEAT="$HOME/Library/Application Support/VoiceWheel/heartbeat"
+FREEZE_DIR="$HOME/Library/Application Support/VoiceWheel"   # where freeze traces go (#49)
 STALE_AFTER=15   # seconds with no heartbeat = main thread hung -> kill + restart
 GRACE=12         # ignore the heartbeat for the first N seconds (boot / warm-up)
 
@@ -51,7 +52,11 @@ while true; do
     if [ -f "$HEARTBEAT" ]; then
       age=$(( now - $(stat -f %m "$HEARTBEAT" 2>/dev/null || echo "$now") ))
       if [ "$age" -gt "$STALE_AFTER" ]; then
-        echo "⚠️  Зависание (нет heartbeat ${age}с) — перезапускаю…"
+        # Snapshot the frozen process BEFORE killing it, so we can diagnose #49.
+        FREEZE_LOG="$FREEZE_DIR/freeze-$(date +%Y%m%d-%H%M%S).txt"
+        echo "⚠️  Зависание (нет heartbeat ${age}с) — снимаю трейс и перезапускаю…"
+        sample "$APP_PID" 3 -file "$FREEZE_LOG" >/dev/null 2>&1 \
+          && echo "  📄 трейс фриза сохранён: $FREEZE_LOG  (пришли этот файл)"
         kill -9 "$APP_PID" 2>/dev/null
         hung=1
         break
