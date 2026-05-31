@@ -33,10 +33,16 @@ from AppKit import (
     NSEventModifierFlagShift,
     NSEventTypeKeyDown,
     NSFont,
+    NSLayoutAttributeCenterY,
+    NSLayoutAttributeLeading,
+    NSLayoutConstraint,
     NSPopUpButton,
+    NSStackView,
     NSTabView,
     NSTabViewItem,
     NSTextField,
+    NSUserInterfaceLayoutOrientationHorizontal,
+    NSUserInterfaceLayoutOrientationVertical,
     NSView,
     NSWindow,
     NSWindowStyleMaskClosable,
@@ -184,105 +190,106 @@ class SettingsWindow(NSObject):
         tabs = NSTabView.alloc().initWithFrame_(NSMakeRect(10, 48, W - 20, H - 58))
         root.addSubview_(tabs)
 
-        view = [None]   # the current tab's content view
-        cur = [14]      # y cursor inside that view (flipped: grows downward)
+        stack = [None]   # the current tab's vertical NSStackView (Auto-Layout, auto-aligns)
 
-        def add_tab(label):
-            v = _FlippedView.alloc().initWithFrame_(NSMakeRect(0, 0, W - 28, H - 96))
-            item = NSTabViewItem.alloc().initWithIdentifier_(label)
-            item.setLabel_(label)
-            item.setView_(v)
+        def add_tab(name):
+            container = _FlippedView.alloc().initWithFrame_(NSMakeRect(0, 0, W - 28, H - 96))
+            v = NSStackView.alloc().init()
+            v.setOrientation_(NSUserInterfaceLayoutOrientationVertical)
+            v.setAlignment_(NSLayoutAttributeLeading)
+            v.setSpacing_(8)
+            v.setTranslatesAutoresizingMaskIntoConstraints_(False)
+            container.addSubview_(v)
+            NSLayoutConstraint.activateConstraints_([
+                v.topAnchor().constraintEqualToAnchor_constant_(container.topAnchor(), 16),
+                v.leadingAnchor().constraintEqualToAnchor_constant_(container.leadingAnchor(), 18),
+            ])
+            item = NSTabViewItem.alloc().initWithIdentifier_(name)
+            item.setLabel_(name)
+            item.setView_(container)
             tabs.addTabViewItem_(item)
-            view[0] = v
-            cur[0] = 14
+            stack[0] = v
 
-        def text(s, x, w, size, bold=False, color=None):
+        def label(s, bold=False, gray=False, width=None):
             f = NSTextField.labelWithString_(s)
-            f.setFrame_(NSMakeRect(x, cur[0], w, 20))
-            f.setFont_(NSFont.boldSystemFontOfSize_(size) if bold else NSFont.systemFontOfSize_(size))
-            if color is not None:
-                f.setTextColor_(color)
-            view[0].addSubview_(f)
+            f.setFont_(NSFont.boldSystemFontOfSize_(13) if bold else NSFont.systemFontOfSize_(11 if gray else 12))
+            if gray:
+                f.setTextColor_(NSColor.secondaryLabelColor())
+            if width is not None:
+                f.widthAnchor().constraintEqualToConstant_(width).setActive_(True)
             return f
 
         def header(s):
-            text(s, 12, W - 52, 13, bold=True)
-            cur[0] += 28
+            stack[0].addArrangedSubview_(label(s, bold=True))
 
         def hint(s):
-            cur[0] += 20
-            text(s, 34, W - 72, 10, color=NSColor.secondaryLabelColor())
-            cur[0] += 4
+            stack[0].addArrangedSubview_(label(s, gray=True))
 
-        def rowlabel(s, x=34, w=150):
-            return text(s, x, w, 12)
+        def row(label_text, *controls):
+            h = NSStackView.alloc().init()
+            h.setOrientation_(NSUserInterfaceLayoutOrientationHorizontal)
+            h.setAlignment_(NSLayoutAttributeCenterY)
+            h.setSpacing_(8)
+            h.addArrangedSubview_(label(label_text, width=150))
+            for c in controls:
+                h.addArrangedSubview_(c)
+            stack[0].addArrangedSubview_(h)
+            return h
 
-        def popup(items, x=190, w=290):
-            p = NSPopUpButton.alloc().initWithFrame_pullsDown_(NSMakeRect(x, cur[0] - 3, w, 26), False)
+        def popup(items, w=300):
+            p = NSPopUpButton.alloc().initWithFrame_pullsDown_(NSMakeRect(0, 0, w, 26), False)
             p.addItemsWithTitles_(items)
-            view[0].addSubview_(p)
+            p.widthAnchor().constraintEqualToConstant_(w).setActive_(True)
             return p
 
-        def field(x=190, w=290):
-            t = NSTextField.alloc().initWithFrame_(NSMakeRect(x, cur[0] - 2, w, 24))
-            view[0].addSubview_(t)
+        def field(w=300):
+            t = NSTextField.alloc().initWithFrame_(NSMakeRect(0, 0, w, 22))
+            t.widthAnchor().constraintEqualToConstant_(w).setActive_(True)
             return t
 
-        def checkbox(s, x=34):
-            b = NSButton.checkboxWithTitle_target_action_(s, None, None)
-            b.setFrame_(NSMakeRect(x, cur[0] - 2, W - 96, 22))
-            view[0].addSubview_(b)
-            return b
+        def checkbox(s):
+            return NSButton.checkboxWithTitle_target_action_(s, None, None)
 
-        def btn(title, action, x, w):
+        def button(title, action, w):
             b = NSButton.buttonWithTitle_target_action_(title, self, action)
-            b.setFrame_(NSMakeRect(x, cur[0] - 2, w, 24))
-            view[0].addSubview_(b)
+            b.widthAnchor().constraintEqualToConstant_(w).setActive_(True)
             return b
-
-        def gap(px=34):
-            cur[0] += px
 
         # ---- LLM tab ----
         add_tab("LLM")
         header("🧠 Обработка речи (LLM)")
-        rowlabel("Движок")
         self._backend = popup([lbl for lbl, _ in LLM_BACKENDS])
         self._backend.setTarget_(self)
         self._backend.setAction_("llmBackendChanged:")
+        row("Движок", self._backend)
         hint("Что превращает распознанную речь в результат под промпт сектора.")
-        gap()
-        # The two model fields share one slot — only the relevant one is shown.
-        self._ollama_label = rowlabel("Модель Ollama")
+        # The two model rows share one slot — only the relevant one is shown.
         self._ollama = field()
-        self._claude_label = rowlabel("Модель Claude")
+        self._ollama_row = row("Модель Ollama", self._ollama)
         self._claude = field()
-        gap()
+        self._claude_row = row("Модель Claude", self._claude)
         header("🎛 Модель на промпт (опц.)")
         self._sectors = list(sectors())
-        rowlabel("Промпт")
         self._prompt = popup([s.label for s in self._sectors])
         self._prompt.setTarget_(self)
         self._prompt.setAction_("promptChanged:")
-        gap()
-        rowlabel("Модель")
-        self._sec_backend = popup([BASE_MODEL_LABEL] + [lbl for lbl, _ in LLM_BACKENDS], x=190, w=160)
-        self._sec_model = field(x=358, w=124)
+        row("Промпт", self._prompt)
+        self._sec_backend = popup([BASE_MODEL_LABEL] + [lbl for lbl, _ in LLM_BACKENDS], w=170)
+        self._sec_model = field(w=120)
+        row("Модель", self._sec_backend, self._sec_model)
         hint("«(как базовая)» = движок/модель из «Обработка речи». Иначе — свои для промпта.")
 
         # ---- Speech (STT) tab ----
         add_tab("Речь")
         header("🎙 Распознавание (речь → текст)")
-        rowlabel("Движок")
         self._stt_backend = popup(STT_BACKENDS)
+        row("Движок", self._stt_backend)
         hint("Чем распознаём речь. auto: mlx на Apple Silicon, иначе faster-whisper (можно не трогать).")
-        gap()
-        rowlabel("Модель")
         self._stt_model = popup(STT_MODELS)
+        row("Модель", self._stt_model)
         hint("tiny → быстро/грубо · medium/large → точно/медленно. small — оптимум для русского.")
-        gap()
-        rowlabel("Язык")
         self._lang = popup(LANGS)
+        row("Язык", self._lang)
         hint("auto — определять язык по речи. Или зафиксируй ru/en для точности.")
 
         # ---- Voice (TTS) tab ----
@@ -291,31 +298,30 @@ class SettingsWindow(NSObject):
         self._tts_enabled = checkbox("Озвучка включена")
         self._tts_enabled.setTarget_(self)
         self._tts_enabled.setAction_("ttsEnabledChanged:")
-        gap(30)
-        rowlabel("Голос")
+        stack[0].addArrangedSubview_(self._tts_enabled)
         self._tts_voice = popup([v[0] for v in TTS_VOICES])
         self._tts_voice.setTarget_(self)
         self._tts_voice.setAction_("ttsVoiceChanged:")  # play a sample on change
-        gap()
-        self._prem = btn("macOS: скачать премиум-голоса…", "downloadPremium:", 190, 290)
-        gap()
-        rowlabel("Кнопка озвучки")
-        self._tts_kind = popup(KINDS, x=190, w=105)
-        self._tts_key = field(x=300, w=82)
-        self._cap_tts = btn("Поймать", "captureTts:", 388, 100)
+        row("Голос", self._tts_voice)
+        self._prem = button("macOS: скачать премиум-голоса…", "downloadPremium:", 290)
+        row("", self._prem)
+        self._tts_kind = popup(KINDS, w=110)
+        self._tts_key = field(w=90)
+        self._cap_tts = button("Поймать", "captureTts:", 100)
+        row("Кнопка озвучки", self._tts_kind, self._tts_key, self._cap_tts)
         hint("вид + кнопка/клавиша, или «Поймать» → нажми нужную.")
 
         # ---- Triggers tab ----
         add_tab("Триггеры")
         header("⌨️ Триггер записи (колесо)")
-        rowlabel("Кнопка")
-        self._wheel_kind = popup(KINDS, x=190, w=105)
-        self._wheel_key = field(x=300, w=82)
-        btn("Поймать", "captureWheel:", 388, 100)
+        self._wheel_kind = popup(KINDS, w=110)
+        self._wheel_key = field(w=90)
+        self._cap_wheel = button("Поймать", "captureWheel:", 100)
+        row("Кнопка", self._wheel_kind, self._wheel_key, self._cap_wheel)
         hint("вид + кнопка/клавиша, или «Поймать» → нажми нужную (комбо вроде ⌘F тоже).")
-        gap()
         header("⚙️ Прочее")
         self._concurrent = checkbox("Запись во время обработки (concurrent)")
+        stack[0].addArrangedSubview_(self._concurrent)
 
         # ---- Save + note (always visible, below the tabs) ----
         self._note = NSTextField.labelWithString_("")
@@ -456,12 +462,11 @@ class SettingsWindow(NSObject):
 
     @objc.python_method
     def _apply_llm_visibility(self, backend: str):
-        """Show only the model field that applies to the chosen backend."""
+        """Show only the model row that applies to the chosen backend. NSStackView
+        collapses a hidden arranged row, so no empty gap is left."""
         is_ollama = backend == "ollama"
-        self._ollama_label.setHidden_(not is_ollama)
-        self._ollama.setHidden_(not is_ollama)
-        self._claude_label.setHidden_(is_ollama)
-        self._claude.setHidden_(is_ollama)
+        self._ollama_row.setHidden_(not is_ollama)
+        self._claude_row.setHidden_(is_ollama)
 
     def llmBackendChanged_(self, _sender):  # noqa: N802
         self._apply_llm_visibility(self._llm_value(str(self._backend.titleOfSelectedItem())))
