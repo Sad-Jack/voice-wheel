@@ -257,19 +257,19 @@ class VoiceWheel(NSObject):
             return
         audio = trim_silence(raw)
         print(f"○ стоп → обработка ({ring}/{sector or 'центр'})…", flush=True)
-        self._jobs.begin()
+        token = self._jobs.begin()
         self._spinner.start()  # idempotent; keeps spinning while any job runs
         threading.Thread(
-            target=self._process, args=(audio, ring, sector, gen), daemon=True
+            target=self._process, args=(audio, ring, sector, gen, token), daemon=True
         ).start()
 
     def finishProcessing_(self, _sender):  # noqa: N802
-        if self._jobs.finish() == 0:
-            self._spinner.stop()
         payload = self._jobs.pop_result()
         if payload is None:
             return
-        color, note = payload
+        color, note, token = payload
+        if self._jobs.finish(token) == 0:  # only stop once THIS cycle's jobs are done
+            self._spinner.stop()
         if not color:
             return  # cancelled / stale — no ping
         m = NSEvent.mouseLocation()  # ping where the cursor IS now
@@ -280,7 +280,7 @@ class VoiceWheel(NSObject):
     # -- worker thread --------------------------------------------------------
 
     @objc.python_method
-    def _process(self, audio, ring, sector, gen):
+    def _process(self, audio, ring, sector, gen, token):
         color, note = "", ""
         try:
             result = self._pipeline.run(audio, ring, sector)
@@ -310,7 +310,7 @@ class VoiceWheel(NSObject):
         except Exception as exc:  # noqa: BLE001
             log.exception("processing failed")
             color, note = "red", f"❌ Ошибка: {exc}"
-        self._jobs.push_result((color, note))
+        self._jobs.push_result((color, note, token))
         self.performSelectorOnMainThread_withObject_waitUntilDone_("finishProcessing:", None, False)
 
 
