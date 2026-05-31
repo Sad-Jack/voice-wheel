@@ -5,8 +5,14 @@ settings window is open we switch to a regular activation policy so it can take
 focus, and switch back when it closes. Save writes config.json (other keys are
 preserved); cheap settings apply live, the rest on the next restart.
 
-The window is split into tabs (LLM / Речь / Голос / Триггеры) so it stays short
-and the Save button is always visible below the tabs.
+The window is split into tabs (LLM / Речь / Голос / Триггеры / Язык) so it stays
+short and the Save button is always visible below the tabs.
+
+Interface language (#43/#53): every chrome string goes through ``T(key)`` which
+picks the RU or EN variant from ``STR``. The default follows the system locale;
+the «Язык» tab lets you switch, which persists ``ui_language`` and rebuilds the
+window in place. Dropdowns whose labels are translated (LLM engines, TTS voices)
+map selection by *index*, not title, so a language switch can't break Save.
 """
 
 from __future__ import annotations
@@ -48,7 +54,7 @@ from AppKit import (
     NSWindowStyleMaskClosable,
     NSWindowStyleMaskTitled,
 )
-from Foundation import NSMakeRect, NSObject
+from Foundation import NSLocale, NSMakeRect, NSObject
 
 from ...core.config import _project_root
 from ...core.modes import sectors
@@ -61,6 +67,130 @@ class _FlippedView(NSView):
 
     def isFlipped(self):  # noqa: N802
         return True
+
+
+# -- interface strings (ru, en) -------------------------------------------------
+# Every visible chrome string lives here so the whole window can switch language.
+STR = {
+    "win_title": ("Voice Wheel — Настройки", "Voice Wheel — Settings"),
+    "tab_llm": ("LLM", "LLM"),
+    "tab_stt": ("Речь", "Speech"),
+    "tab_voice": ("Голос", "Voice"),
+    "tab_triggers": ("Триггеры", "Triggers"),
+    "tab_lang": ("Язык", "Language"),
+    # LLM tab
+    "llm_header": ("🧠 Обработка речи (LLM)", "🧠 Speech processing (LLM)"),
+    "engine": ("Движок", "Engine"),
+    "llm_hint": (
+        "Что превращает распознанную речь в результат под промпт сектора.",
+        "What turns recognized speech into the result for the sector's prompt.",
+    ),
+    "ollama_model": ("Модель Ollama", "Ollama model"),
+    "claude_model": ("Модель Claude", "Claude model"),
+    "rules_header": ("🎛 Модель на промпт — правила (опц.)", "🎛 Per-prompt model — rules (opt.)"),
+    "rules_hint": (
+        "Базовая (выше) — для всех промптов. Правило задаёт свою модель отдельному.",
+        "Base (above) applies to every prompt. A rule sets a separate model for one.",
+    ),
+    "add_rule": ("+ Добавить правило", "+ Add rule"),
+    "reset_tab": ("↺ Сбросить вкладку", "↺ Reset tab"),
+    # Speech tab
+    "stt_header": ("🎙 Распознавание (речь → текст)", "🎙 Recognition (speech → text)"),
+    "stt_engine_hint": (
+        "Чем распознаём речь. auto: mlx на Apple Silicon, иначе faster-whisper (можно не трогать).",
+        "Speech recognizer. auto: mlx on Apple Silicon, else faster-whisper (safe to leave).",
+    ),
+    "model": ("Модель", "Model"),
+    "stt_model_hint": (
+        "tiny → быстро/грубо · medium/large → точно/медленно. small — оптимум для русского.",
+        "tiny → fast/rough · medium/large → accurate/slow. small is the Russian sweet spot.",
+    ),
+    "language": ("Язык", "Language"),
+    "stt_lang_hint": (
+        "auto — определять язык по речи. Или зафиксируй ru/en для точности.",
+        "auto — detect the language from speech. Or pin ru/en for accuracy.",
+    ),
+    # Voice tab
+    "voice_header": ("🔊 Голос (озвучка)", "🔊 Voice (text-to-speech)"),
+    "tts_enabled": ("Озвучка включена", "Text-to-speech enabled"),
+    "voice": ("Голос", "Voice"),
+    "premium": ("macOS: скачать премиум-голоса…", "macOS: download premium voices…"),
+    "tts_button": ("Кнопка озвучки", "Read-aloud button"),
+    "tts_hint": (
+        "вид + кнопка/клавиша, или «Поймать» → нажми нужную.",
+        "type + button/key, or «Catch» → press the one you want.",
+    ),
+    # Triggers tab
+    "trig_header": ("⌨️ Триггер записи (колесо)", "⌨️ Record trigger (wheel)"),
+    "trig_button": ("Кнопка", "Button"),
+    "trig_hint": (
+        "вид + кнопка/клавиша, или «Поймать» → нажми нужную (комбо вроде ⌘F тоже).",
+        "type + button/key, or «Catch» → press the one you want (combos like ⌘F too).",
+    ),
+    "misc_header": ("⚙️ Прочее", "⚙️ Other"),
+    "concurrent": (
+        "Запись во время обработки (concurrent)",
+        "Record while a result is processing (concurrent)",
+    ),
+    # Language tab
+    "lang_header": ("🌐 Язык интерфейса", "🌐 Interface language"),
+    "lang_row": ("Язык интерфейса", "Interface language"),
+    "lang_hint": (
+        "Меняет язык этого окна. По умолчанию — как в системе.",
+        "Changes this window's language. Defaults to your system language.",
+    ),
+    # buttons / runtime
+    "catch": ("Поймать", "Catch"),
+    "catching": ("нажми…", "press…"),
+    "save": ("Сохранить", "Save"),
+    "note_saved_applied": (
+        "Сохранено и применено: голос, LLM/модели, concurrent. "
+        "Триггеры и STT-модель — после перезапуска.",
+        "Saved and applied: voice, LLM/models, concurrent. "
+        "Triggers and STT model — after restart.",
+    ),
+    "note_saved_restart": (
+        "Сохранено. Перезапусти приложение (меню-бар → Выход).",
+        "Saved. Restart the app (menu bar → Quit).",
+    ),
+    "note_save_fail": ("⚠️ Не удалось сохранить: {}", "⚠️ Couldn't save: {}"),
+    "note_reset": (
+        "Вкладка «{}» сброшена. Нажми «Сохранить».",
+        "Tab «{}» reset. Click «Save».",
+    ),
+    "note_capture_prompt": (
+        "Нажми клавишу/комбо или кнопку мыши (Esc — отмена)…",
+        "Press a key/combo or a mouse button (Esc to cancel)…",
+    ),
+    "note_capture_caught": (
+        "Поймал: {} / {}. Нажми «Сохранить».",
+        "Caught: {} / {}. Click «Save».",
+    ),
+    "note_preview_dl": (
+        "Скачиваю голос для прослушивания…",
+        "Downloading the voice to preview…",
+    ),
+    "note_piper_dl": (
+        "Скачиваю голос «{}»… применится после перезапуска.",
+        "Downloading voice «{}»… applies after restart.",
+    ),
+    "note_premium": (
+        "Открыл «Озвучивание»: скачай русский голос (Enhanced/Premium), затем выбери "
+        "«macOS» в списке голосов. Применится после перезапуска.",
+        "Opened «Spoken Content»: download a voice (Enhanced/Premium), then pick "
+        "«macOS» in the voice list. Applies after restart.",
+    ),
+}
+
+
+def _detect_ui_lang() -> str:
+    """System locale → 'ru' if the preferred language is Russian, else 'en'."""
+    try:
+        langs = NSLocale.preferredLanguages()
+        code = str(langs[0]) if langs and len(langs) else ""
+    except Exception:  # noqa: BLE001 - never let locale probing break the window
+        code = ""
+    return "ru" if code.lower().startswith("ru") else "en"
 
 
 # macOS keyCodes -> pynput-compatible names for keys that aren't plain characters.
@@ -116,25 +246,26 @@ def _capture_kind_key(event):
     return _mouse_kind_key(int(event.buttonNumber()))
 
 
-# (human label, config value) — the LLM backend picker shows the label, stores the value.
+# (config value, (ru label, en label)) — the picker shows the label, stores the value.
+# Selection is read/written by *index* so translated labels never break Save.
 LLM_BACKENDS = [
-    ("Локально — Ollama (бесплатно, без ключа)", "ollama"),
-    ("Claude Max (подписка)", "claude_warm"),
-    ("Claude API (нужен ключ)", "anthropic"),
-    ("Claude CLI", "claude_cli"),
+    ("ollama", ("Локально — Ollama (бесплатно, без ключа)", "Local — Ollama (free, no key)")),
+    ("claude_warm", ("Claude Max (подписка)", "Claude Max (subscription)")),
+    ("anthropic", ("Claude API (нужен ключ)", "Claude API (needs a key)")),
+    ("claude_cli", ("Claude CLI", "Claude CLI")),
 ]
 STT_BACKENDS = ["auto", "mlx", "faster-whisper"]
 STT_MODELS = ["tiny", "base", "small", "medium", "large"]
 LANGS = ["auto", "ru", "en"]
 KINDS = ["mouse_side", "keyboard", "mouse"]
-# TTS voice picker: (label, backend, piper_voice). "system" = macOS voices (auto-picks
-# the best installed quality); "piper" = local neural, auto-downloaded on save/first use.
+# TTS voice picker: (backend, piper_voice, (ru label, en label)). "system" = macOS
+# voices; "piper" = local neural, auto-downloaded on save/first use. Index-mapped.
 TTS_VOICES = [
-    ("macOS (системный голос)", "system", ""),
-    ("Piper: Irina — нейро (RU, жен.)", "piper", "ru_RU-irina-medium"),
-    ("Piper: Денис — нейро (RU, муж.)", "piper", "ru_RU-denis-medium"),
-    ("Piper: Руслан — нейро (RU, муж.)", "piper", "ru_RU-ruslan-medium"),
-    ("Piper: Дмитрий — нейро (RU, муж.)", "piper", "ru_RU-dmitri-medium"),
+    ("system", "", ("macOS (системный голос)", "macOS (system voice)")),
+    ("piper", "ru_RU-irina-medium", ("Piper: Irina — нейро (RU, жен.)", "Piper: Irina — neural (RU, female)")),
+    ("piper", "ru_RU-denis-medium", ("Piper: Денис — нейро (RU, муж.)", "Piper: Denis — neural (RU, male)")),
+    ("piper", "ru_RU-ruslan-medium", ("Piper: Руслан — нейро (RU, муж.)", "Piper: Ruslan — neural (RU, male)")),
+    ("piper", "ru_RU-dmitri-medium", ("Piper: Дмитрий — нейро (RU, муж.)", "Piper: Dmitri — neural (RU, male)")),
 ]
 W = 520
 H = 440
@@ -149,11 +280,18 @@ class SettingsWindow(NSObject):
             self._rules = []              # per-prompt model rules (rows): each = dict of controls
             self._apply_cb = None         # controller hook to apply cheap settings live
             self._capture_monitor = None  # active NSEvent monitor while catching a key
+            self._uilang = "ru"           # interface language ('ru' | 'en')
+            self._rebuilding = False      # True while swapping windows for a language change
         return self
 
     @objc.python_method
     def set_apply_callback(self, cb):
         self._apply_cb = cb
+
+    @objc.python_method
+    def _t(self, key):
+        """Translate a chrome string key for the current interface language."""
+        return STR[key][0 if self._uilang == "ru" else 1]
 
     # -- public ---------------------------------------------------------------
 
@@ -173,13 +311,19 @@ class SettingsWindow(NSObject):
     def _build(self):  # noqa: C901 - flat UI construction, easier read top-to-bottom
         if self._window is not None:
             return
+        self._uilang = self._read().get("ui_language") or _detect_ui_lang()
+        idx = 0 if self._uilang == "ru" else 1
+
+        def T(key):
+            return STR[key][idx]
+
         win = NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
             NSMakeRect(0, 0, W, H),
             NSWindowStyleMaskTitled | NSWindowStyleMaskClosable,
             NSBackingStoreBuffered,
             False,
         )
-        win.setTitle_("Voice Wheel — Настройки")
+        win.setTitle_(T("win_title"))
         win.setReleasedWhenClosed_(False)
         win.setDelegate_(self)
         root = win.contentView()
@@ -189,7 +333,7 @@ class SettingsWindow(NSObject):
 
         stack = [None]   # the current tab's vertical NSStackView (Auto-Layout, auto-aligns)
 
-        def add_tab(name):
+        def add_tab(key):
             container = _FlippedView.alloc().initWithFrame_(NSMakeRect(0, 0, W - 28, H - 96))
             v = NSStackView.alloc().init()
             v.setOrientation_(NSUserInterfaceLayoutOrientationVertical)
@@ -201,8 +345,8 @@ class SettingsWindow(NSObject):
                 v.topAnchor().constraintEqualToAnchor_constant_(container.topAnchor(), 16),
                 v.leadingAnchor().constraintEqualToAnchor_constant_(container.leadingAnchor(), 18),
             ])
-            item = NSTabViewItem.alloc().initWithIdentifier_(name)
-            item.setLabel_(name)
+            item = NSTabViewItem.alloc().initWithIdentifier_(key)
+            item.setLabel_(T(key))
             item.setView_(container)
             tabs.addTabViewItem_(item)
             stack[0] = v
@@ -216,18 +360,18 @@ class SettingsWindow(NSObject):
                 f.widthAnchor().constraintEqualToConstant_(width).setActive_(True)
             return f
 
-        def header(s):
-            stack[0].addArrangedSubview_(label(s, bold=True))
+        def header(key):
+            stack[0].addArrangedSubview_(label(T(key), bold=True))
 
-        def hint(s):
-            stack[0].addArrangedSubview_(label(s, gray=True))
+        def hint(key):
+            stack[0].addArrangedSubview_(label(T(key), gray=True))
 
-        def row(label_text, *controls):
+        def row(label_key, *controls):
             h = NSStackView.alloc().init()
             h.setOrientation_(NSUserInterfaceLayoutOrientationHorizontal)
             h.setAlignment_(NSLayoutAttributeCenterY)
             h.setSpacing_(8)
-            h.addArrangedSubview_(label(label_text, width=150))
+            h.addArrangedSubview_(label(T(label_key) if label_key else "", width=150))
             for c in controls:
                 h.addArrangedSubview_(c)
             stack[0].addArrangedSubview_(h)
@@ -244,85 +388,95 @@ class SettingsWindow(NSObject):
             t.widthAnchor().constraintEqualToConstant_(w).setActive_(True)
             return t
 
-        def checkbox(s):
-            return NSButton.checkboxWithTitle_target_action_(s, None, None)
+        def checkbox(key):
+            return NSButton.checkboxWithTitle_target_action_(T(key), None, None)
 
-        def button(title, action, w):
-            b = NSButton.buttonWithTitle_target_action_(title, self, action)
+        def button(key, action, w):
+            b = NSButton.buttonWithTitle_target_action_(T(key), self, action)
             b.widthAnchor().constraintEqualToConstant_(w).setActive_(True)
             return b
 
         # ---- LLM tab ----
-        add_tab("LLM")
-        header("🧠 Обработка речи (LLM)")
-        self._backend = popup([lbl for lbl, _ in LLM_BACKENDS])
+        add_tab("tab_llm")
+        header("llm_header")
+        self._backend = popup(self._backend_labels())
         self._backend.setTarget_(self)
         self._backend.setAction_("llmBackendChanged:")
-        row("Движок", self._backend)
-        hint("Что превращает распознанную речь в результат под промпт сектора.")
+        row("engine", self._backend)
+        hint("llm_hint")
         # The two model rows share one slot — only the relevant one is shown.
         self._ollama = field()
-        self._ollama_row = row("Модель Ollama", self._ollama)
+        self._ollama_row = row("ollama_model", self._ollama)
         self._claude = field()
-        self._claude_row = row("Модель Claude", self._claude)
-        header("🎛 Модель на промпт — правила (опц.)")
-        hint("Базовая (выше) — для всех промптов. Правило задаёт свою модель отдельному.")
+        self._claude_row = row("claude_model", self._claude)
+        header("rules_header")
+        hint("rules_hint")
         self._sectors = list(sectors())
         self._rules_stack = NSStackView.alloc().init()
         self._rules_stack.setOrientation_(NSUserInterfaceLayoutOrientationVertical)
         self._rules_stack.setAlignment_(NSLayoutAttributeLeading)
         self._rules_stack.setSpacing_(6)
         stack[0].addArrangedSubview_(self._rules_stack)
-        self._add_rule_btn = button("+ Добавить правило", "addRule:", 180)
+        self._add_rule_btn = button("add_rule", "addRule:", 180)
         stack[0].addArrangedSubview_(self._add_rule_btn)
-        stack[0].addArrangedSubview_(button("↺ Сбросить вкладку", "resetLlm:", 200))
+        stack[0].addArrangedSubview_(button("reset_tab", "resetLlm:", 200))
 
         # ---- Speech (STT) tab ----
-        add_tab("Речь")
-        header("🎙 Распознавание (речь → текст)")
+        add_tab("tab_stt")
+        header("stt_header")
         self._stt_backend = popup(STT_BACKENDS)
-        row("Движок", self._stt_backend)
-        hint("Чем распознаём речь. auto: mlx на Apple Silicon, иначе faster-whisper (можно не трогать).")
+        row("engine", self._stt_backend)
+        hint("stt_engine_hint")
         self._stt_model = popup(STT_MODELS)
-        row("Модель", self._stt_model)
-        hint("tiny → быстро/грубо · medium/large → точно/медленно. small — оптимум для русского.")
+        row("model", self._stt_model)
+        hint("stt_model_hint")
         self._lang = popup(LANGS)
-        row("Язык", self._lang)
-        hint("auto — определять язык по речи. Или зафиксируй ru/en для точности.")
-        stack[0].addArrangedSubview_(button("↺ Сбросить вкладку", "resetStt:", 200))
+        row("language", self._lang)
+        hint("stt_lang_hint")
+        stack[0].addArrangedSubview_(button("reset_tab", "resetStt:", 200))
 
         # ---- Voice (TTS) tab ----
-        add_tab("Голос")
-        header("🔊 Голос (озвучка)")
-        self._tts_enabled = checkbox("Озвучка включена")
+        add_tab("tab_voice")
+        header("voice_header")
+        self._tts_enabled = checkbox("tts_enabled")
         self._tts_enabled.setTarget_(self)
         self._tts_enabled.setAction_("ttsEnabledChanged:")
         stack[0].addArrangedSubview_(self._tts_enabled)
-        self._tts_voice = popup([v[0] for v in TTS_VOICES])
+        self._tts_voice = popup(self._voice_labels())
         self._tts_voice.setTarget_(self)
         self._tts_voice.setAction_("ttsVoiceChanged:")  # play a sample on change
-        row("Голос", self._tts_voice)
-        self._prem = button("macOS: скачать премиум-голоса…", "downloadPremium:", 290)
+        row("voice", self._tts_voice)
+        self._prem = button("premium", "downloadPremium:", 290)
         row("", self._prem)
         self._tts_kind = popup(KINDS, w=110)
         self._tts_key = field(w=90)
-        self._cap_tts = button("Поймать", "captureTts:", 100)
-        row("Кнопка озвучки", self._tts_kind, self._tts_key, self._cap_tts)
-        hint("вид + кнопка/клавиша, или «Поймать» → нажми нужную.")
-        stack[0].addArrangedSubview_(button("↺ Сбросить вкладку", "resetVoice:", 200))
+        self._cap_tts = button("catch", "captureTts:", 100)
+        row("tts_button", self._tts_kind, self._tts_key, self._cap_tts)
+        hint("tts_hint")
+        stack[0].addArrangedSubview_(button("reset_tab", "resetVoice:", 200))
 
         # ---- Triggers tab ----
-        add_tab("Триггеры")
-        header("⌨️ Триггер записи (колесо)")
+        add_tab("tab_triggers")
+        header("trig_header")
         self._wheel_kind = popup(KINDS, w=110)
         self._wheel_key = field(w=90)
-        self._cap_wheel = button("Поймать", "captureWheel:", 100)
-        row("Кнопка", self._wheel_kind, self._wheel_key, self._cap_wheel)
-        hint("вид + кнопка/клавиша, или «Поймать» → нажми нужную (комбо вроде ⌘F тоже).")
-        header("⚙️ Прочее")
-        self._concurrent = checkbox("Запись во время обработки (concurrent)")
+        self._cap_wheel = button("catch", "captureWheel:", 100)
+        row("trig_button", self._wheel_kind, self._wheel_key, self._cap_wheel)
+        hint("trig_hint")
+        header("misc_header")
+        self._concurrent = checkbox("concurrent")
         stack[0].addArrangedSubview_(self._concurrent)
-        stack[0].addArrangedSubview_(button("↺ Сбросить вкладку", "resetTriggers:", 200))
+        stack[0].addArrangedSubview_(button("reset_tab", "resetTriggers:", 200))
+
+        # ---- Language tab ----
+        add_tab("tab_lang")
+        header("lang_header")
+        self._uilang_popup = popup(["Русский", "English"], w=200)
+        self._uilang_popup.setTarget_(self)
+        self._uilang_popup.setAction_("languageChanged:")
+        self._uilang_popup.selectItemAtIndex_(0 if self._uilang == "ru" else 1)
+        row("lang_row", self._uilang_popup)
+        hint("lang_hint")
 
         # ---- Save + note (always visible, below the tabs) ----
         self._note = NSTextField.labelWithString_("")
@@ -331,7 +485,7 @@ class SettingsWindow(NSObject):
         self._note.setTextColor_(NSColor.secondaryLabelColor())
         root.addSubview_(self._note)
 
-        save = NSButton.buttonWithTitle_target_action_("Сохранить", self, "save:")
+        save = NSButton.buttonWithTitle_target_action_(T("save"), self, "save:")
         save.setFrame_(NSMakeRect(W - 130, 12, 116, 30))
         root.addSubview_(save)
 
@@ -355,15 +509,22 @@ class SettingsWindow(NSObject):
             return {}
 
     @objc.python_method
+    def _write(self, data):
+        self._path().write_text(
+            json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+
+    @objc.python_method
     def _load(self):
         data = self._read()
+        self._uilang = data.get("ui_language") or _detect_ui_lang()
+        self._uilang_popup.selectItemAtIndex_(0 if self._uilang == "ru" else 1)
         llm = data.get("llm", {})
         hk = data.get("hotkey", {})
         tts = data.get("tts", {})
         tts_hk = tts.get("hotkey", {})
-        backend = llm.get("backend", "ollama")
-        self._backend.selectItemWithTitle_(self._llm_label(backend))
-        self._apply_llm_visibility(backend)
+        self._select_backend(self._backend, llm.get("backend", "ollama"))
+        self._apply_llm_visibility(llm.get("backend", "ollama"))
         self._ollama.setStringValue_(str(llm.get("ollama_model", "qwen2.5:7b")))
         self._claude.setStringValue_(str(llm.get("model", "claude-haiku-4-5")))
         stt = data.get("stt", {})
@@ -374,7 +535,7 @@ class SettingsWindow(NSObject):
         self._wheel_key.setStringValue_(str(hk.get("key", "3")))
         self._tts_kind.selectItemWithTitle_(tts_hk.get("kind", "mouse_side"))
         self._tts_key.setStringValue_(str(tts_hk.get("key", "4")))
-        self._tts_voice.selectItemWithTitle_(self._voice_label(tts))
+        self._select_voice(tts)
         self._tts_enabled.setState_(1 if tts.get("enabled", True) else 0)
         self._apply_tts_enabled()
         self._concurrent.setState_(1 if data.get("concurrent", False) else 0)
@@ -389,8 +550,9 @@ class SettingsWindow(NSObject):
 
     def save_(self, _sender):  # noqa: N802
         data = self._read()
+        data["ui_language"] = self._uilang
         data.setdefault("llm", {})
-        data["llm"]["backend"] = self._llm_value(str(self._backend.titleOfSelectedItem()))
+        data["llm"]["backend"] = self._backend_value(self._backend)
         data["llm"]["ollama_model"] = str(self._ollama.stringValue())
         data["llm"]["model"] = str(self._claude.stringValue())
         data.setdefault("stt", {})
@@ -418,7 +580,7 @@ class SettingsWindow(NSObject):
             key = self._rule_sector_key(r)
             if key:
                 sm[key] = {
-                    "backend": self._llm_value(str(r["engine"].titleOfSelectedItem())),
+                    "backend": self._backend_value(r["engine"]),
                     "model": str(r["model"].stringValue()).strip(),
                 }
         existing = data.get("sector_models")
@@ -426,12 +588,10 @@ class SettingsWindow(NSObject):
             sm["_comment"] = existing["_comment"]
         data["sector_models"] = sm
         try:
-            self._path().write_text(
-                json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
-            )
+            self._write(data)
         except OSError as exc:  # disk/permissions — tell the user, don't throw into ObjC
             log.warning("could not write %s: %s", self._path(), exc)
-            self._note.setStringValue_(f"⚠️ Не удалось сохранить: {exc}")
+            self._note.setStringValue_(self._t("note_save_fail").format(exc))
             return
         applied = False
         if self._apply_cb is not None:
@@ -440,31 +600,28 @@ class SettingsWindow(NSObject):
                 applied = True
             except Exception as exc:  # noqa: BLE001 - never let live-apply break Save
                 log.warning("live-apply failed: %s", exc)
-        if applied:
-            self._note.setStringValue_(
-                "Сохранено и применено: голос, LLM/модели, concurrent. "
-                "Триггеры и STT-модель — после перезапуска."
-            )
-        else:
-            self._note.setStringValue_("Сохранено. Перезапусти приложение (меню-бар → Выход).")
+        self._note.setStringValue_(
+            self._t("note_saved_applied" if applied else "note_saved_restart")
+        )
         if backend == "piper":
             self._maybe_download_piper(piper_voice)
 
-    # -- LLM backend helpers --------------------------------------------------
+    # -- LLM backend helpers (index-mapped so translated labels are safe) ------
 
     @objc.python_method
-    def _llm_label(self, value: str) -> str:
-        for lbl, v in LLM_BACKENDS:
-            if v == value:
-                return lbl
-        return LLM_BACKENDS[0][0]
+    def _backend_labels(self):
+        idx = 0 if self._uilang == "ru" else 1
+        return [pair[idx] for _v, pair in LLM_BACKENDS]
 
     @objc.python_method
-    def _llm_value(self, label: str) -> str:
-        for lbl, v in LLM_BACKENDS:
-            if lbl == label:
-                return v
-        return "ollama"
+    def _select_backend(self, popup, value):
+        i = next((i for i, (v, _p) in enumerate(LLM_BACKENDS) if v == value), 0)
+        popup.selectItemAtIndex_(i)
+
+    @objc.python_method
+    def _backend_value(self, popup):
+        i = int(popup.indexOfSelectedItem())
+        return LLM_BACKENDS[i][0] if 0 <= i < len(LLM_BACKENDS) else "ollama"
 
     @objc.python_method
     def _apply_llm_visibility(self, backend: str):
@@ -475,7 +632,39 @@ class SettingsWindow(NSObject):
         self._claude_row.setHidden_(is_ollama)
 
     def llmBackendChanged_(self, _sender):  # noqa: N802
-        self._apply_llm_visibility(self._llm_value(str(self._backend.titleOfSelectedItem())))
+        self._apply_llm_visibility(self._backend_value(self._backend))
+
+    # -- interface language (#43/#53) ----------------------------------------
+
+    def languageChanged_(self, _sender):  # noqa: N802
+        new = "ru" if int(self._uilang_popup.indexOfSelectedItem()) == 0 else "en"
+        if new == self._uilang:
+            return
+        self._uilang = new
+        try:  # persist immediately; other unsaved form edits are intentionally not written
+            data = self._read()
+            data["ui_language"] = new
+            self._write(data)
+        except OSError as exc:
+            log.warning("could not persist ui_language: %s", exc)
+        # Rebuild on the next runloop tick, after this popup's action settles.
+        self.performSelector_withObject_afterDelay_("rebuildLang:", None, 0.0)
+
+    def rebuildLang_(self, _arg=None):  # noqa: N802
+        """Swap the window for a freshly-built one in the new language, in place."""
+        old = self._window
+        if old is None:
+            return
+        frame = old.frame()
+        self._window = None
+        self._build()
+        self._load()
+        self._window.setFrame_display_(frame, True)
+        self._rebuilding = True   # so the old window's close doesn't drop activation policy
+        old.close()
+        self._rebuilding = False
+        self._window.makeKeyAndOrderFront_(None)
+        NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
 
     # -- per-tab reset to defaults (#51) -------------------------------------
     # Each button resets only its own tab's controls to the config dataclass
@@ -486,7 +675,7 @@ class SettingsWindow(NSObject):
         from ...core.config import LLMConfig
 
         d = LLMConfig()
-        self._backend.selectItemWithTitle_(self._llm_label(d.backend))
+        self._select_backend(self._backend, d.backend)
         self._apply_llm_visibility(d.backend)
         self._ollama.setStringValue_(d.ollama_model)
         self._claude.setStringValue_(d.model)
@@ -494,7 +683,7 @@ class SettingsWindow(NSObject):
             self._rules_stack.removeView_(r["row"])
         self._rules = []
         self._refresh_add_button()
-        self._note.setStringValue_("Вкладка «LLM» сброшена. Нажми «Сохранить».")
+        self._note.setStringValue_(self._t("note_reset").format(self._t("tab_llm")))
 
     def resetStt_(self, _sender):  # noqa: N802
         from ...core.config import STTConfig
@@ -503,20 +692,18 @@ class SettingsWindow(NSObject):
         self._stt_backend.selectItemWithTitle_(d.backend)
         self._stt_model.selectItemWithTitle_(d.model)
         self._lang.selectItemWithTitle_("ru")
-        self._note.setStringValue_("Вкладка «Речь» сброшена. Нажми «Сохранить».")
+        self._note.setStringValue_(self._t("note_reset").format(self._t("tab_stt")))
 
     def resetVoice_(self, _sender):  # noqa: N802
         from ...core.config import TTSConfig
 
         d = TTSConfig()
         self._tts_enabled.setState_(1 if d.enabled else 0)
-        self._tts_voice.selectItemWithTitle_(
-            self._voice_label({"backend": d.backend, "piper_voice": d.piper_voice})
-        )
+        self._select_voice({"backend": d.backend, "piper_voice": d.piper_voice})
         self._tts_kind.selectItemWithTitle_(d.hotkey.kind)
         self._tts_key.setStringValue_(d.hotkey.key)
         self._apply_tts_enabled()
-        self._note.setStringValue_("Вкладка «Голос» сброшена. Нажми «Сохранить».")
+        self._note.setStringValue_(self._t("note_reset").format(self._t("tab_voice")))
 
     def resetTriggers_(self, _sender):  # noqa: N802
         from ...core.config import HotkeyConfig
@@ -525,7 +712,7 @@ class SettingsWindow(NSObject):
         self._wheel_kind.selectItemWithTitle_(d.kind)
         self._wheel_key.setStringValue_(d.key)
         self._concurrent.setState_(0)
-        self._note.setStringValue_("Вкладка «Триггеры» сброшена. Нажми «Сохранить».")
+        self._note.setStringValue_(self._t("note_reset").format(self._t("tab_triggers")))
 
     # -- per-prompt model rules ----------------------------------------------
 
@@ -557,9 +744,9 @@ class SettingsWindow(NSObject):
         if lbl:
             prompt.selectItemWithTitle_(lbl)
         engine = NSPopUpButton.alloc().initWithFrame_pullsDown_(NSMakeRect(0, 0, 150, 26), False)
-        engine.addItemsWithTitles_([lab for lab, _ in LLM_BACKENDS])
+        engine.addItemsWithTitles_(self._backend_labels())
         engine.widthAnchor().constraintEqualToConstant_(150).setActive_(True)
-        engine.selectItemWithTitle_(self._llm_label(backend))
+        self._select_backend(engine, backend)
         model_field = NSTextField.alloc().initWithFrame_(NSMakeRect(0, 0, 110, 22))
         model_field.widthAnchor().constraintEqualToConstant_(110).setActive_(True)
         model_field.setStringValue_(str(model or ""))
@@ -576,7 +763,7 @@ class SettingsWindow(NSObject):
         key = self._first_unassigned()
         if key is None:
             return
-        backend = self._llm_value(str(self._backend.titleOfSelectedItem()))
+        backend = self._backend_value(self._backend)
         model = str(self._ollama.stringValue()) if backend == "ollama" else str(self._claude.stringValue())
         self._make_rule_row(key, backend, model)  # default to the base config
         self._refresh_add_button()
@@ -615,8 +802,8 @@ class SettingsWindow(NSObject):
         if self._capture_monitor is not None:
             return  # already catching
         old_title = str(button.title())
-        button.setTitle_("нажми…")
-        self._note.setStringValue_("Нажми клавишу/комбо или кнопку мыши (Esc — отмена)…")
+        button.setTitle_(self._t("catching"))
+        self._note.setStringValue_(self._t("note_capture_prompt"))
         mask = NSEventMaskKeyDown | NSEventMaskOtherMouseDown | NSEventMaskRightMouseDown
 
         def handler(event):
@@ -626,7 +813,7 @@ class SettingsWindow(NSObject):
             if kind != "cancel":
                 kind_popup.selectItemWithTitle_(kind)
                 key_field.setStringValue_(key)
-                self._note.setStringValue_(f"Поймал: {kind} / {key}. Нажми «Сохранить».")
+                self._note.setStringValue_(self._t("note_capture_caught").format(kind, key))
             if self._capture_monitor is not None:
                 NSEvent.removeMonitor_(self._capture_monitor)
                 self._capture_monitor = None
@@ -653,7 +840,7 @@ class SettingsWindow(NSObject):
 
                 cache = app_support_dir() / "piper"
                 if not (cache / f"{piper_voice}.onnx").exists():
-                    self._note.setStringValue_("Скачиваю голос для прослушивания…")
+                    self._note.setStringValue_(self._t("note_preview_dl"))
                 self._preview_speaker = PiperSpeaker(piper_voice, cache)
             else:
                 from .tts import Speaker
@@ -663,26 +850,30 @@ class SettingsWindow(NSObject):
         except Exception as exc:  # noqa: BLE001 - preview must never break the window
             log.warning("voice preview failed: %s", exc)
 
-    # -- TTS voice helpers ----------------------------------------------------
+    # -- TTS voice helpers (index-mapped) ------------------------------------
 
     @objc.python_method
-    def _voice_label(self, tts: dict) -> str:
-        """Map the saved config back to a dropdown label."""
+    def _voice_labels(self):
+        idx = 0 if self._uilang == "ru" else 1
+        return [pair[idx] for _b, _pv, pair in TTS_VOICES]
+
+    @objc.python_method
+    def _select_voice(self, tts: dict):
+        """Select the dropdown row matching the saved (backend, piper_voice)."""
         backend = tts.get("backend", "system")
-        piper_voice = tts.get("piper_voice", "ru_RU-irina-medium")
-        for label, b, pv in TTS_VOICES:
-            if b == backend and (b != "piper" or pv == piper_voice):
-                return label
-        return TTS_VOICES[0][0]
+        pv = tts.get("piper_voice", "ru_RU-irina-medium")
+        i = next(
+            (i for i, (b, p, _l) in enumerate(TTS_VOICES) if b == backend and (b != "piper" or p == pv)),
+            0,
+        )
+        self._tts_voice.selectItemAtIndex_(i)
 
     @objc.python_method
     def _selected_voice(self):
         """Map the dropdown selection to (backend, piper_voice)."""
-        sel = str(self._tts_voice.titleOfSelectedItem())
-        for label, backend, piper_voice in TTS_VOICES:
-            if label == sel:
-                return backend, piper_voice
-        return "system", ""
+        i = int(self._tts_voice.indexOfSelectedItem())
+        b, p, _l = TTS_VOICES[i] if 0 <= i < len(TTS_VOICES) else TTS_VOICES[0]
+        return b, p
 
     @objc.python_method
     def _maybe_download_piper(self, voice_name: str) -> None:
@@ -694,7 +885,7 @@ class SettingsWindow(NSObject):
         cache = app_support_dir() / "piper"
         if (cache / f"{voice_name}.onnx").exists():
             return
-        self._note.setStringValue_(f"Скачиваю голос «{voice_name}»… применится после перезапуска.")
+        self._note.setStringValue_(self._t("note_piper_dl").format(voice_name))
 
         def _dl():
             try:
@@ -717,15 +908,14 @@ class SettingsWindow(NSObject):
             "x-apple.systempreferences:com.apple.preference.universalaccess?SpokenContent"
         )
         NSWorkspace.sharedWorkspace().openURL_(url)
-        self._note.setStringValue_(
-            "Открыл «Озвучивание»: скачай русский голос (Enhanced/Premium), затем выбери "
-            "«macOS» в списке голосов. Применится после перезапуска."
-        )
+        self._note.setStringValue_(self._t("note_premium"))
 
     def windowWillClose_(self, _notif):  # noqa: N802
         if self._capture_monitor is not None:
             NSEvent.removeMonitor_(self._capture_monitor)
             self._capture_monitor = None
+        if self._rebuilding:
+            return  # a language rebuild swaps windows; keep the regular policy
         NSApplication.sharedApplication().setActivationPolicy_(
             NSApplicationActivationPolicyAccessory
         )
