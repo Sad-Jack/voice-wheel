@@ -53,12 +53,14 @@ class TTSConfig:
     backend: str = "piper"  # "piper" (local neural, auto-downloaded) | "system" (macOS voices)
     voice: str = ""  # system backend: exact voice name to force; empty = best for the language
     piper_voice: str = "ru_RU-irina-medium"  # piper backend: which neural voice to use
-    hotkey: HotkeyConfig = field(default_factory=lambda: HotkeyConfig(kind="mouse_side", key="4"))
+    # 0..N bindings, all live at once (e.g. a side mouse button AND a keyboard combo).
+    hotkeys: list = field(default_factory=lambda: [HotkeyConfig(kind="mouse_side", key="4")])
 
 
 @dataclass
 class Config:
-    hotkey: HotkeyConfig = field(default_factory=HotkeyConfig)
+    # Record trigger(s): a list of bindings, all live at once (mouse + keyboard).
+    hotkeys: list = field(default_factory=lambda: [HotkeyConfig()])
     language: str = "ru"  # mutable at runtime via the tray toggle
     ui_language: str = ""  # interface language 'ru'|'en'; "" = follow the system locale
     stt: STTConfig = field(default_factory=STTConfig)
@@ -82,7 +84,7 @@ class Config:
             except (json.JSONDecodeError, OSError) as exc:  # pragma: no cover - defensive
                 raise RuntimeError(f"Could not read config at {path}: {exc}") from exc
         return cls(
-            hotkey=HotkeyConfig(**_pick(raw.get("hotkey"), HotkeyConfig)),
+            hotkeys=_parse_hotkeys(raw.get("hotkey"), [HotkeyConfig()]),
             language=raw.get("language", "ru"),
             ui_language=str(raw.get("ui_language", "")),
             stt=STTConfig(**_pick(raw.get("stt"), STTConfig)),
@@ -108,21 +110,26 @@ def _parse_sector_models(section: Any) -> dict:
     return out
 
 
+def _parse_hotkeys(section: Any, fallback: list) -> list:
+    """A trigger's bindings. Accepts a single {kind,key} (legacy) or a list of them;
+    returns a list of HotkeyConfig. An empty/missing section falls back to ``fallback``;
+    an explicit empty list ``[]`` means "no binding" (kept as-is)."""
+    if isinstance(section, dict):
+        return [HotkeyConfig(**_pick(section, HotkeyConfig))]
+    if isinstance(section, list):
+        return [HotkeyConfig(**_pick(it, HotkeyConfig)) for it in section if isinstance(it, dict)]
+    return list(fallback)
+
+
 def _parse_tts(section: Any) -> TTSConfig:
     if not isinstance(section, dict):
         return TTSConfig()
-    hk = section.get("hotkey")
-    hotkey = (
-        HotkeyConfig(**_pick(hk, HotkeyConfig))
-        if isinstance(hk, dict)
-        else HotkeyConfig(kind="mouse_side", key="4")
-    )
     return TTSConfig(
         enabled=bool(section.get("enabled", True)),
         backend=str(section.get("backend", "system")),
         voice=str(section.get("voice", "")),
         piper_voice=str(section.get("piper_voice", "ru_RU-irina-medium")),
-        hotkey=hotkey,
+        hotkeys=_parse_hotkeys(section.get("hotkey"), [HotkeyConfig(kind="mouse_side", key="4")]),
     )
 
 
