@@ -37,6 +37,16 @@ STR = {
         "The key is stored in .env (gitignored). Anthropic: console.anthropic.com → API Keys. "
         "OpenAI: platform.openai.com → API keys. Applies immediately.",
     ),
+    "download": ("Скачать", "Download"),
+    "note_ollama_pull": (
+        "Скачиваю модель «{}»… (ollama pull, идёт в фоне)",
+        "Downloading model «{}»… (ollama pull, in the background)",
+    ),
+    "note_ollama_pulled": ("Модель «{}» скачана.", "Model «{}» downloaded."),
+    "note_ollama_pull_fail": (
+        "Не удалось скачать «{}». Установлена и запущена ли Ollama? (ollama serve)",
+        "Couldn't download «{}». Is Ollama installed and running? (ollama serve)",
+    ),
     "ollama_url": ("URL", "URL"),
     "ollama_hint": (
         "Локальная модель через Ollama — должна быть установлена и запущена (ollama serve). "
