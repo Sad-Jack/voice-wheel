@@ -84,7 +84,7 @@ class SideButtonTap:
         self._ready.set()
         Quartz.CFRunLoopRun()  # blocks this daemon thread, pumping the tap forever
 
-    def _callback(self, proxy, type_, event, refcon):  # noqa: ANN001 - runs on the tap thread
+    def _callback(self, _proxy, type_, event, _refcon):  # noqa: ANN001 - runs on the tap thread
         # Re-arm if the system disabled the tap (timeout / heavy load).
         if type_ in (
             Quartz.kCGEventTapDisabledByTimeout,

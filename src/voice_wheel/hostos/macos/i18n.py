@@ -335,10 +335,6 @@ STR = {
         "Облачный провайдер: Anthropic (Claude) или OpenAI (GPT).",
         "Cloud provider: Anthropic (Claude) or OpenAI (GPT).",
     ),
-    "tip_api_key": (
-        "Ключ провайдера. Хранится в .env, применяется сразу.",
-        "The provider's key. Stored in .env, applies immediately.",
-    ),
     "tip_model": (
         "Конкретная модель: выбери рекомендацию или впиши свою.",
         "The specific model: pick a recommendation or type your own.",
