@@ -769,6 +769,7 @@ class SettingsWindow(NSObject):
         """Save reflects whether the form actually differs from the saved state, so
         reverting a change (or a reset that lands back on the saved values) disarms it."""
         self._set_dirty(self._full_snapshot() != self._baseline)
+        self._refresh_rule_summaries()  # keep each collapsed rule's summary current
 
     @objc.python_method
     def _restart_changed(self, old, new_lang, new_wheel, new_tts, new_stt_backend, new_stt_model):
@@ -1701,43 +1702,91 @@ class SettingsWindow(NSObject):
         self._add_rule_btn.setEnabled_(self._first_unassigned() is not None)
 
     @objc.python_method
-    def _make_rule_row(self, sector_key, backend, model):
-        """Build one rule row — [промпт ▾] [движок ▾] [модель] [✕] — and track it."""
-        h = NSStackView.alloc().init()
-        h.setOrientation_(NSUserInterfaceLayoutOrientationHorizontal)
-        h.setAlignment_(NSLayoutAttributeCenterY)
-        h.setSpacing_(6)
-        prompt = NSPopUpButton.alloc().initWithFrame_pullsDown_(NSMakeRect(0, 0, 130, 26), False)
+    def _make_rule_row(self, sector_key, backend, model, expanded=False):
+        """One rule as a collapsible panel: a summary header (disclosure ▸/▾ +
+        «промпт → движок · модель» + ✕) over a detail row with the full engine config
+        ([промпт ▾] [движок ▾] [модель ▾]) — mirroring the base block, collapsed by
+        default and re-openable to edit."""
+        prompt = NSPopUpButton.alloc().initWithFrame_pullsDown_(NSMakeRect(0, 0, 150, 26), False)
         prompt.addItemsWithTitles_([s.label for s in self._sectors])
-        prompt.widthAnchor().constraintEqualToConstant_(130).setActive_(True)
+        prompt.widthAnchor().constraintEqualToConstant_(150).setActive_(True)
         prompt.setTarget_(self)
         prompt.setAction_("markDirty:")
         lbl = next((s.label for s in self._sectors if s.key == sector_key), None)
         if lbl:
             prompt.selectItemWithTitle_(lbl)
-        engine = NSPopUpButton.alloc().initWithFrame_pullsDown_(NSMakeRect(0, 0, 150, 26), False)
+        engine = NSPopUpButton.alloc().initWithFrame_pullsDown_(NSMakeRect(0, 0, 180, 26), False)
         engine.addItemsWithTitles_(self._backend_labels())
-        engine.widthAnchor().constraintEqualToConstant_(150).setActive_(True)
+        engine.widthAnchor().constraintEqualToConstant_(180).setActive_(True)
         engine.setTarget_(self)
         engine.setAction_("ruleEngineChanged:")  # repopulate the model dropdown + mark dirty
         self._select_backend(engine, backend)
         self._set_rule_engine_availability(engine)  # grey out engines without a key
         # editable combo: dropdown lists the engine's models (installed ones for
         # Ollama), but you can still type a custom name.
-        model_combo = NSComboBox.alloc().initWithFrame_(NSMakeRect(0, 0, 150, 26))
-        model_combo.widthAnchor().constraintEqualToConstant_(150).setActive_(True)
+        model_combo = NSComboBox.alloc().initWithFrame_(NSMakeRect(0, 0, 170, 26))
+        model_combo.widthAnchor().constraintEqualToConstant_(170).setActive_(True)
         model_combo.setCompletes_(True)
         model_combo.addItemsWithObjectValues_(self._rule_models_for(backend))
         model_combo.setStringValue_(str(model or ""))
         model_combo.setDelegate_(self)
+
+        detail = NSStackView.alloc().init()
+        detail.setOrientation_(NSUserInterfaceLayoutOrientationHorizontal)
+        detail.setAlignment_(NSLayoutAttributeCenterY)
+        detail.setSpacing_(6)
+        for c in (prompt, engine, model_combo):
+            detail.addArrangedSubview_(c)
+
+        disclosure = NSButton.buttonWithTitle_target_action_("▸", self, "ruleToggle:")
+        disclosure.setBordered_(False)
+        disclosure.widthAnchor().constraintEqualToConstant_(22).setActive_(True)
+        summary = NSTextField.labelWithString_("")
+        summary.setFont_(NSFont.systemFontOfSize_(12))
         delete = NSButton.buttonWithTitle_target_action_("✕", self, "deleteRule:")
         delete.widthAnchor().constraintEqualToConstant_(32).setActive_(True)
-        for c in (prompt, engine, model_combo, delete):
-            h.addArrangedSubview_(c)
-        self._rules.append(
-            {"row": h, "prompt": prompt, "engine": engine, "model": model_combo, "delete": delete}
-        )
-        self._rules_stack.addArrangedSubview_(h)
+        header = NSStackView.alloc().init()
+        header.setOrientation_(NSUserInterfaceLayoutOrientationHorizontal)
+        header.setAlignment_(NSLayoutAttributeCenterY)
+        header.setSpacing_(6)
+        for c in (disclosure, summary, delete):
+            header.addArrangedSubview_(c)
+
+        container = NSStackView.alloc().init()
+        container.setOrientation_(NSUserInterfaceLayoutOrientationVertical)
+        container.setAlignment_(NSLayoutAttributeLeading)
+        container.setSpacing_(2)
+        container.addArrangedSubview_(header)
+        container.addArrangedSubview_(detail)
+
+        rule = {"row": container, "prompt": prompt, "engine": engine, "model": model_combo,
+                "delete": delete, "detail": detail, "disclosure": disclosure, "summary": summary}
+        self._rules.append(rule)
+        self._rules_stack.addArrangedSubview_(container)
+        self._set_rule_expanded(rule, expanded)
+        self._update_rule_summary(rule)
+
+    @objc.python_method
+    def _set_rule_expanded(self, rule, expanded):
+        rule["detail"].setHidden_(not expanded)
+        rule["disclosure"].setTitle_("▾" if expanded else "▸")
+
+    @objc.python_method
+    def _update_rule_summary(self, rule):
+        p = str(rule["prompt"].titleOfSelectedItem() or "")
+        eng = str(rule["engine"].titleOfSelectedItem() or "")
+        m = str(rule["model"].stringValue()).strip() or "—"
+        rule["summary"].setStringValue_(f"{p} → {eng} · {m}")
+
+    @objc.python_method
+    def _refresh_rule_summaries(self):
+        for r in getattr(self, "_rules", []):
+            self._update_rule_summary(r)
+
+    def ruleToggle_(self, sender):  # noqa: N802
+        rule = next((r for r in self._rules if r["disclosure"] == sender), None)
+        if rule is not None:
+            self._set_rule_expanded(rule, rule["detail"].isHidden())  # hidden -> expand
 
     @objc.python_method
     def _rule_models_for(self, backend):
@@ -1768,7 +1817,7 @@ class SettingsWindow(NSObject):
         if key is None:
             return
         # default a new rule to the base connection's backend + model
-        self._make_rule_row(key, self._current_backend(), self._current_model())
+        self._make_rule_row(key, self._current_backend(), self._current_model(), expanded=True)
         self._refresh_add_button()
         self._recompute_dirty()
 
