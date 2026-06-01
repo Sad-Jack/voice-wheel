@@ -459,7 +459,9 @@ class SettingsWindow(NSObject):
         #    status/restart live on the «Модели» tab (no duplicate controls here). --
         self._grp_ollama = group()
         prev, stack[0] = stack[0], self._grp_ollama
-        self._ollama = combo(OLLAMA_MODELS, w=190)
+        # A pure selector of INSTALLED models (filled live from /api/tags) — no
+        # free-text. Download / manage models on the «Модели» tab.
+        self._ollama = popup([], w=200)
         row("model", self._ollama)
         self._ollama_url = field(w=250)
         row("ollama_url", self._ollama_url)
@@ -698,12 +700,12 @@ class SettingsWindow(NSObject):
         """Any user edit -> mark dirty (Save turns green). Programmatic value sets
         in _load don't fire these, so loading leaves the form clean."""
         for p in (self._stt_backend, self._stt_model, self._lang, self._wheel_ms,
-                  self._tts_ms, self._uilang_popup):
+                  self._tts_ms, self._uilang_popup, self._ollama):
             p.setTarget_(self)
             p.setAction_("markDirty:")
         self._concurrent.setTarget_(self)
         self._concurrent.setAction_("markDirty:")
-        for f in (self._api_key, self._api_key_plain, self._api_model, self._ollama,
+        for f in (self._api_key, self._api_key_plain, self._api_model,
                   self._ollama_url, self._cc_model, self._wheel_kb, self._tts_kb):
             f.setDelegate_(self)  # controlTextDidChange_ fires per keystroke
 
@@ -886,7 +888,8 @@ class SettingsWindow(NSObject):
         self._last_provider = str(self._provider.titleOfSelectedItem())
         self._model_by_provider = {"Anthropic": ANTHROPIC_MODELS[0], "OpenAI": OPENAI_MODELS[0]}
         self._model_by_provider[self._last_provider] = model
-        self._ollama.setStringValue_(str(llm.get("ollama_model", "qwen2.5:7b")))
+        self._ollama_model_value = str(llm.get("ollama_model", "qwen2.5:7b"))
+        self._refresh_ollama_model_popup()  # shows the saved model now; the live check adds the rest
         self._ollama_url.setStringValue_(str(llm.get("ollama_url", "http://localhost:11434")))
         self._set_api_key(self._read_env().get(self._provider_env_var(), ""))
         self._api_show.setState_(0)
@@ -927,7 +930,7 @@ class SettingsWindow(NSObject):
         ctype = self._selected_conn_type()
         if ctype == "ollama":
             data["llm"]["backend"] = "ollama"
-            data["llm"]["ollama_model"] = str(self._ollama.stringValue()).strip()
+            data["llm"]["ollama_model"] = str(self._ollama.titleOfSelectedItem() or "").strip()
             url = str(self._ollama_url.stringValue()).strip()
             data["llm"]["ollama_url"] = url or "http://localhost:11434"
         elif ctype == "api":
@@ -1060,7 +1063,7 @@ class SettingsWindow(NSObject):
     def _current_model(self):
         t = self._selected_conn_type()
         if t == "ollama":
-            return str(self._ollama.stringValue())
+            return str(self._ollama.titleOfSelectedItem() or "")
         if t == "api":
             return str(self._api_model.stringValue())
         return str(self._cc_model.stringValue())
@@ -1250,21 +1253,25 @@ class SettingsWindow(NSObject):
             self._ollama_action.setHidden_(True)
         self._update_installed_models()
         if self._ollama_state == "running":
-            self._refresh_ollama_model_combo()
+            self._refresh_ollama_model_popup()
             for r in getattr(self, "_rules", []):  # rule rows on Ollama -> installed list
                 if self._backend_value(r["engine"]) == "ollama":
                     self._refresh_rule_model_combo(r)
 
     @objc.python_method
-    def _refresh_ollama_model_combo(self):
-        """The LLM-tab model picker's dropdown lists only INSTALLED models (downloading
-        lives on the Models tab, so non-downloaded models are no longer offered).
-        Keeps the currently configured value in the editable field."""
-        installed = [name for name, _ in getattr(self, "_ollama_models", [])]
-        cur = str(self._ollama.stringValue())
+    def _refresh_ollama_model_popup(self):
+        """The LLM-tab model picker is a pure selector of INSTALLED models (download /
+        manage on the Models tab). The configured model is kept selectable even if it
+        isn't installed (so opening settings never silently changes the saved value)."""
+        desired = str(self._ollama.titleOfSelectedItem() or "") or getattr(
+            self, "_ollama_model_value", "")
+        items = [name for name, _ in getattr(self, "_ollama_models", [])]
+        if desired and desired not in items:
+            items.insert(0, desired)
         self._ollama.removeAllItems()
-        self._ollama.addItemsWithObjectValues_(installed)
-        self._ollama.setStringValue_(cur)
+        self._ollama.addItemsWithTitles_(items)
+        if desired:
+            self._ollama.selectItemWithTitle_(desired)
 
     @objc.python_method
     def _clear_installed(self):
@@ -1465,7 +1472,7 @@ class SettingsWindow(NSObject):
             )
             return (self._selected_conn_type(), str(self._provider.titleOfSelectedItem()),
                     self._api_key_value(), str(self._api_model.stringValue()),
-                    str(self._ollama.stringValue()), str(self._ollama_url.stringValue()),
+                    str(self._ollama.titleOfSelectedItem() or ""), str(self._ollama_url.stringValue()),
                     str(self._cc_model.stringValue()), rules)
         if ident == "tab_stt":
             return (str(self._stt_backend.titleOfSelectedItem()),
@@ -1493,7 +1500,8 @@ class SettingsWindow(NSObject):
         self._refresh_api_models()
         self._api_model.setStringValue_(d.model)
         self._cc_model.setStringValue_(d.model)
-        self._ollama.setStringValue_(d.ollama_model)
+        self._ollama_model_value = d.ollama_model
+        self._refresh_ollama_model_popup()
         self._ollama_url.setStringValue_(d.ollama_url)
         self._apply_conn_visibility()
         for r in list(self._rules):  # drop every per-prompt rule
