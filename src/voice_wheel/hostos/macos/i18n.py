@@ -88,6 +88,17 @@ STR = {
         "once done it appears in the list above.",
     ),
     "ollama_library_btn": ("🔗 Библиотека моделей Ollama", "🔗 Ollama model library"),
+    "model_delete_tip": ("Удалить эту модель", "Delete this model"),
+    "model_delete_confirm_title": ("Удалить «{}»?", "Delete «{}»?"),
+    "model_delete_confirm_body": (
+        "Модель будет удалена из Ollama и освободит место. Скачать заново можно в любой момент.",
+        "The model will be removed from Ollama, freeing disk space. You can re-download it anytime.",
+    ),
+    "model_delete_btn": ("Удалить", "Delete"),
+    "cancel": ("Отмена", "Cancel"),
+    "model_removing": ("🗑 Удаляю «{}»…", "🗑 Removing «{}»…"),
+    "model_removed": ("✅ Модель «{}» удалена.", "✅ Model «{}» removed."),
+    "model_remove_fail": ("❌ Не удалось удалить «{}».", "❌ Couldn't remove «{}»."),
     "models_pull_btn": ("Скачать", "Download"),
     "models_downloading": ("⏳ Скачиваю «{}»… (может занять минуты)", "⏳ Downloading «{}»… (may take minutes)"),
     "models_downloading_pct": (

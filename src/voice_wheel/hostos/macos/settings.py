@@ -493,11 +493,12 @@ class SettingsWindow(NSObject):
         st_btns.addArrangedSubview_(button("ollama_recheck_btn", "recheckOllama:", 110))
         stack[0].addArrangedSubview_(st_btns)
         stack[0].addArrangedSubview_(label(T("models_installed_header"), bold=True))
-        self._models_installed = label("", gray=True)
-        self._models_installed.setUsesSingleLineMode_(False)
-        self._models_installed.setLineBreakMode_(NSLineBreakByWordWrapping)
-        self._models_installed.setMaximumNumberOfLines_(0)
-        self._models_installed.setPreferredMaxLayoutWidth_(W - 68)
+        # A row per installed model — "• name (size)  [✕]" — so each can be deleted.
+        self._models_installed = NSStackView.alloc().init()
+        self._models_installed.setOrientation_(NSUserInterfaceLayoutOrientationVertical)
+        self._models_installed.setAlignment_(NSLayoutAttributeLeading)
+        self._models_installed.setSpacing_(4)
+        self._installed_rows = []
         stack[0].addArrangedSubview_(self._models_installed)
         stack[0].addArrangedSubview_(label(T("models_download_header"), bold=True))
         self._models_pull = combo(OLLAMA_MODELS, w=220)
@@ -1195,7 +1196,7 @@ class SettingsWindow(NSObject):
         and which models are installed, then reflect it on the Models tab."""
         self._ollama_status.setStringValue_(self._t("ollama_checking"))
         self._ollama_status.setTextColor_(NSColor.secondaryLabelColor())
-        self._models_installed.setStringValue_(self._t("models_installed_loading"))
+        self._set_installed_message(self._t("models_installed_loading"))
         url = str(self._ollama_url.stringValue()).strip() or "http://localhost:11434"
         threading.Thread(target=self._check_ollama, args=(url,), daemon=True).start()
 
@@ -1247,7 +1248,7 @@ class SettingsWindow(NSObject):
             self._ollama_action.setHidden_(False)
         else:
             self._ollama_action.setHidden_(True)
-        self._update_installed_label()
+        self._update_installed_models()
         if self._ollama_state == "running":
             self._refresh_ollama_model_combo()
             for r in getattr(self, "_rules", []):  # rule rows on Ollama -> installed list
@@ -1266,22 +1267,90 @@ class SettingsWindow(NSObject):
         self._ollama.setStringValue_(cur)
 
     @objc.python_method
-    def _update_installed_label(self):
+    def _clear_installed(self):
+        for v in list(self._models_installed.arrangedSubviews()):
+            self._models_installed.removeView_(v)
+        self._installed_rows = []
+
+    @objc.python_method
+    def _set_installed_message(self, text):
+        self._clear_installed()
+        lab = NSTextField.labelWithString_(text)
+        lab.setFont_(NSFont.systemFontOfSize_(11))
+        lab.setTextColor_(NSColor.secondaryLabelColor())
+        self._models_installed.addArrangedSubview_(lab)
+
+    @objc.python_method
+    def _update_installed_models(self):
         models = getattr(self, "_ollama_models", [])
         if self._ollama_state != "running":
-            self._models_installed.setStringValue_("—")
+            self._set_installed_message("—")
             return
         if not models:
-            self._models_installed.setStringValue_(self._t("models_installed_none"))
+            self._set_installed_message(self._t("models_installed_none"))
             return
 
         def _sz(n):
             gb = n / 1e9
             return f"{gb:.1f} GB" if gb >= 0.1 else f"{n / 1e6:.0f} MB"
 
-        self._models_installed.setStringValue_(
-            "\n".join(f"• {name}  ({_sz(size)})" for name, size in models)
+        self._clear_installed()
+        for name, size in models:
+            h = NSStackView.alloc().init()
+            h.setOrientation_(NSUserInterfaceLayoutOrientationHorizontal)
+            h.setAlignment_(NSLayoutAttributeCenterY)
+            h.setSpacing_(8)
+            lab = NSTextField.labelWithString_(f"• {name}  ({_sz(size)})")
+            lab.setFont_(NSFont.systemFontOfSize_(11))
+            lab.setTextColor_(NSColor.secondaryLabelColor())
+            lab.widthAnchor().constraintEqualToConstant_(260).setActive_(True)  # align the ✕
+            btn = NSButton.buttonWithTitle_target_action_("✕", self, "deleteModel:")
+            btn.widthAnchor().constraintEqualToConstant_(30).setActive_(True)
+            btn.setToolTip_(self._t("model_delete_tip"))
+            h.addArrangedSubview_(lab)
+            h.addArrangedSubview_(btn)
+            self._models_installed.addArrangedSubview_(h)
+            self._installed_rows.append({"model": name, "btn": btn, "row": h})
+
+    def deleteModel_(self, sender):  # noqa: N802
+        from AppKit import NSAlert, NSAlertFirstButtonReturn
+
+        rule = next((r for r in self._installed_rows if r["btn"] == sender), None)
+        if rule is None:
+            return
+        model = rule["model"]
+        alert = NSAlert.alloc().init()
+        alert.setMessageText_(self._t("model_delete_confirm_title").format(model))
+        alert.setInformativeText_(self._t("model_delete_confirm_body"))
+        alert.addButtonWithTitle_(self._t("model_delete_btn"))  # default = Delete
+        alert.addButtonWithTitle_(self._t("cancel"))
+        if alert.runModal() != NSAlertFirstButtonReturn:
+            return
+        sender.setEnabled_(False)
+        self._note.setStringValue_(self._t("model_removing").format(model))
+        threading.Thread(target=self._remove_ollama, args=(model,), daemon=True).start()
+
+    @objc.python_method
+    def _remove_ollama(self, model):
+        import subprocess
+
+        ok = False
+        try:
+            proc = subprocess.run(["ollama", "rm", model], capture_output=True, text=True, timeout=60)
+            ok = proc.returncode == 0
+            if not ok:
+                log.warning("ollama rm %s: %s", model, (proc.stderr or proc.stdout or "")[:200])
+        except Exception as exc:  # noqa: BLE001 - ollama missing / not running / timeout
+            log.warning("ollama rm %s failed: %s", model, exc)
+        self._remove_result = (ok, model)
+        self.performSelectorOnMainThread_withObject_waitUntilDone_("ollamaRemoveDone:", None, False)
+
+    def ollamaRemoveDone_(self, _arg):  # noqa: N802
+        ok, model = self._remove_result
+        self._note.setStringValue_(
+            self._t("model_removed" if ok else "model_remove_fail").format(model)
         )
+        self._start_ollama_check()  # refresh installed list + status + the model pickers
 
     def ollamaAction_(self, _sender):  # noqa: N802
         if self._ollama_state == "not_installed":
