@@ -571,20 +571,17 @@ class SettingsWindow(NSObject):
         stack = [None]   # the current tab's vertical NSStackView (Auto-Layout, auto-aligns)
 
         b = _TabBuilder(self, tabs, stack)
+        # aliases so the still-inline tab blocks read unchanged; each is dropped as
+        # its tab is extracted, and the lot disappears once every tab is a method.
         add_tab = b.add_tab
-
         label = b.label
         header = b.header
         hint = b.hint
-
         row = b.row
         popup = b.popup
         field = b.field
         combo = b.combo
-        checkbox = b.checkbox
         button = b.button
-
-        trig_row = b.trig_row
         group = b.group
 
         # ---- LLM tab (scrollable: base config + up to one rule per prompt) ----
@@ -747,28 +744,7 @@ class SettingsWindow(NSObject):
         self._build_stt(b)
 
         # ---- Voice (TTS) tab ----
-        add_tab("tab_voice")
-        header("voice_header")
-        self._tts_enabled = checkbox("tts_enabled")
-        self._tts_enabled.setTarget_(self)
-        self._tts_enabled.setAction_("ttsEnabledChanged:")
-        stack[0].addArrangedSubview_(self._tts_enabled)
-        self._tts_voice = popup(self._voice_labels())
-        self._tts_voice.setTarget_(self)
-        self._tts_voice.setAction_("ttsVoiceChanged:")  # play a sample on change
-        row("voice", self._tts_voice)
-        self._prem = button("premium", "downloadPremium:", 290)
-        row("", self._prem)
-        # read-aloud trigger: keyboard row + mouse row, each with an on/off checkbox
-        stack[0].addArrangedSubview_(label(T("tts_button"), bold=True))
-        self._tts_kb = field(w=170)
-        self._cap_tts_kb = button("catch", "captureTtsKb:", 100)
-        self._tts_kb_on = trig_row("trig_kb", self._tts_kb, self._cap_tts_kb)
-        self._tts_ms = popup(self._mouse_labels(), w=200)
-        self._tts_ms_map = [(k, key) for k, key, _ in MOUSE_BUTTONS]
-        self._cap_tts_ms = button("catch", "captureTtsMs:", 90)
-        self._tts_ms_on = trig_row("trig_mouse", self._tts_ms, self._cap_tts_ms)
-        hint("trig_check_hint")
+        self._build_voice(b)
 
         # ---- Triggers tab ----
         self._build_triggers(b)
@@ -892,6 +868,31 @@ class SettingsWindow(NSObject):
         b.header("misc_header")
         self._concurrent = b.checkbox("concurrent")
         b.cur.addArrangedSubview_(self._concurrent)
+
+    @objc.python_method
+    def _build_voice(self, b):
+        b.add_tab("tab_voice")
+        b.header("voice_header")
+        self._tts_enabled = b.checkbox("tts_enabled")
+        self._tts_enabled.setTarget_(self)
+        self._tts_enabled.setAction_("ttsEnabledChanged:")
+        b.cur.addArrangedSubview_(self._tts_enabled)
+        self._tts_voice = b.popup(self._voice_labels())
+        self._tts_voice.setTarget_(self)
+        self._tts_voice.setAction_("ttsVoiceChanged:")  # play a sample on change
+        b.row("voice", self._tts_voice)
+        self._prem = b.button("premium", "downloadPremium:", 290)
+        b.row("", self._prem)
+        # read-aloud trigger: keyboard row + mouse row, each with an on/off checkbox
+        b.cur.addArrangedSubview_(b.label(self._t("tts_button"), bold=True))
+        self._tts_kb = b.field(w=170)
+        self._cap_tts_kb = b.button("catch", "captureTtsKb:", 100)
+        self._tts_kb_on = b.trig_row("trig_kb", self._tts_kb, self._cap_tts_kb)
+        self._tts_ms = b.popup(self._mouse_labels(), w=200)
+        self._tts_ms_map = [(k, key) for k, key, _ in MOUSE_BUTTONS]
+        self._cap_tts_ms = b.button("catch", "captureTtsMs:", 90)
+        self._tts_ms_on = b.trig_row("trig_mouse", self._tts_ms, self._cap_tts_ms)
+        b.hint("trig_check_hint")
 
     @objc.python_method
     def _set_tooltips(self):
