@@ -390,6 +390,7 @@ class SettingsWindow(NSObject):
             self._uilang = "ru"           # language THIS window is rendered in ('ru' | 'en')
             self._dirty = False           # any unsaved change? drives the Save button state
             self._save_btn = None
+            self._reset_btn = None        # «Сброс»; hidden on tabs with nothing to reset
             self._tabs = None
             self._baseline = None         # form snapshot at load -> Save = (form != baseline)
             self._restart_warn = None     # always-visible "saving will restart" label
@@ -442,6 +443,11 @@ class SettingsWindow(NSObject):
         ident = item.identifier() if item is not None else None
         if ident == "tab_keys":
             self._refresh_key_status()  # surface «не работает» when the user looks (#14)
+        # «Сброс» only resets settings tabs; hide it where it does nothing (Логи /
+        # Модели / Промпты / Ключи) so it isn't a dead button.
+        if self._reset_btn is not None:
+            self._reset_btn.setHidden_(
+                ident not in ("tab_llm", "tab_stt", "tab_voice", "tab_triggers", "tab_lang"))
         # The «Логи» feed only ticks while it's the visible tab (no wasted work).
         on_logs = ident == "tab_logs"
         self._set_logs_timer(on_logs)
@@ -486,8 +492,14 @@ class SettingsWindow(NSObject):
             text = "\n".join(format_log_line(ev, self._uilang) for ev in events)
         else:
             text = _tr("logs_empty", self._uilang)
+        if str(tv.string()) == text:
+            return  # nothing new — don't re-set the string; the 1.5s auto-refresh would
+            #          otherwise wipe a selection the user is making to copy a line out
         pinned = self._logs_pinned_to_bottom()  # don't yank the user if they scrolled up
+        sel = tv.selectedRange()               # preserve the selection across the update
         tv.setString_(text)
+        if sel.length and (sel.location + sel.length) <= tv.string().length():
+            tv.setSelectedRange_(sel)          # new lines append at the end → range holds
         if pinned:
             tv.scrollToEndOfDocument_(None)  # keep the newest line in view
 
@@ -578,11 +590,11 @@ class SettingsWindow(NSObject):
         root.addSubview_(self._restart_warn)
 
         # ---- bottom bar: Reset (left) · note · Save (right) ----
-        reset_btn = NSButton.buttonWithTitle_target_action_(
+        self._reset_btn = NSButton.buttonWithTitle_target_action_(
             T("reset_tab"), self, "resetCurrentTab:"
         )
-        reset_btn.setFrame_(NSMakeRect(16, 12, 96, 30))
-        root.addSubview_(reset_btn)
+        self._reset_btn.setFrame_(NSMakeRect(16, 12, 96, 30))
+        root.addSubview_(self._reset_btn)
 
         self._note = NSTextField.labelWithString_("")
         # Sits between Reset (left) and Save (right); wraps to 2 lines so longer
