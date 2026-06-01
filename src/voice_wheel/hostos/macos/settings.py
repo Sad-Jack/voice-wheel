@@ -77,6 +77,7 @@ from ...core.config import (
 from ...core.modes import load_sectors, prompts_dir
 from .i18n import detect_ui_lang, resolve_lang
 from .i18n import t as _tr
+from .log_format import format_log_line
 
 log = logging.getLogger(__name__)
 
@@ -482,7 +483,7 @@ class SettingsWindow(NSObject):
         # terminal: scroll up for history, the freshest line is always last
         events = list(reversed(event_log.EVENTS.recent()))
         if events:
-            text = "\n".join(self._format_log_line(ev) for ev in events)
+            text = "\n".join(format_log_line(ev, self._uilang) for ev in events)
         else:
             text = _tr("logs_empty", self._uilang)
         pinned = self._logs_pinned_to_bottom()  # don't yank the user if they scrolled up
@@ -503,41 +504,6 @@ class SettingsWindow(NSObject):
         doc_h = tv.frame().size.height
         return (visible.origin.y + visible.size.height) >= (doc_h - 24)
 
-    @objc.python_method
-    def _format_log_line(self, ev):
-        """One human line for an event dict (see core.event_log). Newest-first order
-        and timestamps are added by the caller / store; this is pure presentation."""
-        import time as _time
-
-        def T(key):
-            return _tr(key, self._uilang)
-
-        def short(s, n=160):
-            s = (s or "").replace("\n", " ").strip()
-            return s if len(s) <= n else s[:n] + "…"
-
-        t = ev.get("t")
-        ts = _time.strftime("%H:%M:%S", _time.localtime(t)) if t else "--:--:--"
-        kind = ev.get("kind", "")
-        if kind == "dictate":
-            body = f'🎤 {T("log_dictation")} → «{short(ev.get("result") or ev.get("transcript"))}»'
-        elif kind == "transform":
-            sector = ev.get("sector") or "?"
-            body = f'🎤 {T("log_recorded")} → 🧠 {sector} → «{short(ev.get("result"))}»'
-        elif kind == "context":
-            sector = ev.get("sector") or "?"
-            body = (f'📋 {T("log_buffer")} · 🎤 {T("log_recorded")} → 🧠 {sector} '
-                    f'→ «{short(ev.get("result"))}»')
-        elif kind == "tts":
-            body = f'🔊 {T("log_spoken")}: «{short(ev.get("text"))}»'
-        elif kind == "crash":
-            body = f'💥 {T("log_crash")}: {short(ev.get("message"), 200)}'
-        else:  # error
-            cat = ev.get("cat") or "other"
-            known = {"auth", "rate_limit", "unreachable", "model", "stt", "other"}
-            human = T(f"err_{cat}" if cat in known else "err_other")
-            body = f'⚠️ {T("log_error")}: {human} — {short(ev.get("message"), 160)}'
-        return f"{ts}  {body}"
 
     # -- build ----------------------------------------------------------------
 
