@@ -28,7 +28,7 @@ STR = {
         "Where the AI that turns speech into the sector-prompt result comes from.",
     ),
     "conn_api": ("Прямой API (облако, по ключу)", "Direct API (cloud, by key)"),
-    "conn_ollama": ("Ollama (локально, бесплатно)", "Ollama (local, free)"),
+    "conn_ollama": ("Ollama (бесплатно)", "Ollama (free)"),
     "conn_cc": ("Claude Code (CLI, подписка Max)", "Claude Code (CLI, Max plan)"),
     "provider": ("Провайдер", "Provider"),
     "api_key": ("API-ключ", "API key"),
@@ -50,10 +50,10 @@ STR = {
     ),
     "ollama_url": ("URL", "URL"),
     "ollama_hint": (
-        "Локальная модель через Ollama — должна быть установлена и запущена (ollama serve). "
-        "URL обычно не трогаем.",
-        "A local model via Ollama — it must be installed and running (ollama serve). "
-        "The URL is usually left as-is.",
+        "Модель через Ollama — должна быть установлена и запущена (ollama serve). "
+        "URL — локальный или свой сервер; обычно не трогаем.",
+        "A model via Ollama — it must be installed and running (ollama serve). "
+        "The URL can be local or your own remote server; usually left as-is.",
     ),
     "ollama_checking": ("Проверяю Ollama…", "Checking Ollama…"),
     "ollama_running": ("✅ Ollama запущена", "✅ Ollama is running"),
@@ -257,7 +257,7 @@ STR = {
     ),
     "onboard_body": (
         "Чтобы обрабатывать речь через ИИ, настрой подключение:\n\n"
-        "1) Выбери способ — Ollama (локально, бесплатно), Прямой API (по ключу) "
+        "1) Выбери способ — Ollama (бесплатно), Прямой API (по ключу) "
         "или Claude Code.\n"
         "2) Выбери или скачай модель.\n"
         "3) Нажми «Сохранить».\n\n"
@@ -300,7 +300,7 @@ STR = {
         "Конкретная модель: выбери рекомендацию или впиши свою.",
         "The specific model: pick a recommendation or type your own.",
     ),
-    "tip_ollama_url": ("Адрес локального Ollama. Обычно не трогаем.", "Local Ollama address. Usually left as-is."),
+    "tip_ollama_url": ("Адрес Ollama — локальной или удалённой (свой сервер). Обычно не трогаем.", "Ollama address — local or remote (your own server). Usually left as-is."),
     "tip_stt_backend": ("Чем распознаём речь. auto — оптимально под железо.", "The recognizer. auto picks the best for your hardware."),
     "tip_stt_model": ("Точность ↔ скорость. small — оптимум для русского.", "Accuracy ↔ speed. small is the Russian sweet spot."),
     "tip_stt_lang": ("Язык распознавания. auto — определять по речи.", "Recognition language. auto detects it from speech."),
