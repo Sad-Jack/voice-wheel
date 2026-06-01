@@ -639,42 +639,8 @@ class SettingsWindow(NSObject):
         hint("cc_hint")
         stack[0] = prev
 
-        # ---- Models tab: one place to download & manage local Ollama models
-        #      (live status + restart, installed list, pull). The LLM tab just picks.
-        add_tab("tab_models", scroll=True)
-        header("models_header")
-        self._ollama_state = None
-        self._ollama_status = label("", gray=True)
-        stack[0].addArrangedSubview_(self._ollama_status)
-        self._ollama_action = NSButton.buttonWithTitle_target_action_("", self, "ollamaAction:")
-        self._ollama_action.widthAnchor().constraintEqualToConstant_(200).setActive_(True)
-        self._ollama_action.setHidden_(True)  # only shown for Install/Start
-        st_btns = NSStackView.alloc().init()
-        st_btns.setOrientation_(NSUserInterfaceLayoutOrientationHorizontal)
-        st_btns.setSpacing_(8)
-        st_btns.addArrangedSubview_(self._ollama_action)
-        st_btns.addArrangedSubview_(button("ollama_restart_btn", "restartOllama:", 190))
-        st_btns.addArrangedSubview_(button("ollama_recheck_btn", "recheckOllama:", 110))
-        stack[0].addArrangedSubview_(st_btns)
-        stack[0].addArrangedSubview_(label(T("models_installed_header"), bold=True))
-        # A row per installed model — "• name (size)  [✕]" — so each can be deleted.
-        self._models_installed = NSStackView.alloc().init()
-        self._models_installed.setOrientation_(NSUserInterfaceLayoutOrientationVertical)
-        self._models_installed.setAlignment_(NSLayoutAttributeLeading)
-        self._models_installed.setSpacing_(4)
-        self._installed_rows = []
-        stack[0].addArrangedSubview_(self._models_installed)
-        stack[0].addArrangedSubview_(label(T("models_download_header"), bold=True))
-        self._models_pull = combo(OLLAMA_MODELS, w=220)
-        self._models_dl_btn = button("models_pull_btn", "downloadOllama:", 110)
-        dl_row = NSStackView.alloc().init()
-        dl_row.setOrientation_(NSUserInterfaceLayoutOrientationHorizontal)
-        dl_row.setSpacing_(8)
-        dl_row.addArrangedSubview_(self._models_pull)
-        dl_row.addArrangedSubview_(self._models_dl_btn)
-        stack[0].addArrangedSubview_(dl_row)
-        hint("models_download_hint")
-        stack[0].addArrangedSubview_(button("ollama_library_btn", "openOllamaLibrary:", 250))
+        # ---- Models tab ----
+        self._build_models(b)
 
         # ---- Prompts tab ----
         self._build_prompts(b)
@@ -902,6 +868,45 @@ class SettingsWindow(NSObject):
         b.cur.addArrangedSubview_(self._rules_stack)
         self._add_rule_btn = b.button("add_rule", "addRule:", 180)
         b.cur.addArrangedSubview_(self._add_rule_btn)
+
+    @objc.python_method
+    def _build_models(self, b):
+        # one place to download & manage local Ollama models (live status + restart,
+        # installed list, pull). The LLM tab just picks.
+        b.add_tab("tab_models", scroll=True)
+        b.header("models_header")
+        self._ollama_state = None
+        self._ollama_status = b.label("", gray=True)
+        b.cur.addArrangedSubview_(self._ollama_status)
+        self._ollama_action = NSButton.buttonWithTitle_target_action_("", self, "ollamaAction:")
+        self._ollama_action.widthAnchor().constraintEqualToConstant_(200).setActive_(True)
+        self._ollama_action.setHidden_(True)  # only shown for Install/Start
+        st_btns = NSStackView.alloc().init()
+        st_btns.setOrientation_(NSUserInterfaceLayoutOrientationHorizontal)
+        st_btns.setSpacing_(8)
+        st_btns.addArrangedSubview_(self._ollama_action)
+        st_btns.addArrangedSubview_(b.button("ollama_restart_btn", "restartOllama:", 190))
+        st_btns.addArrangedSubview_(b.button("ollama_recheck_btn", "recheckOllama:", 110))
+        b.cur.addArrangedSubview_(st_btns)
+        b.cur.addArrangedSubview_(b.label(self._t("models_installed_header"), bold=True))
+        # A row per installed model — "• name (size)  [✕]" — so each can be deleted.
+        self._models_installed = NSStackView.alloc().init()
+        self._models_installed.setOrientation_(NSUserInterfaceLayoutOrientationVertical)
+        self._models_installed.setAlignment_(NSLayoutAttributeLeading)
+        self._models_installed.setSpacing_(4)
+        self._installed_rows = []
+        b.cur.addArrangedSubview_(self._models_installed)
+        b.cur.addArrangedSubview_(b.label(self._t("models_download_header"), bold=True))
+        self._models_pull = b.combo(OLLAMA_MODELS, w=220)
+        self._models_dl_btn = b.button("models_pull_btn", "downloadOllama:", 110)
+        dl_row = NSStackView.alloc().init()
+        dl_row.setOrientation_(NSUserInterfaceLayoutOrientationHorizontal)
+        dl_row.setSpacing_(8)
+        dl_row.addArrangedSubview_(self._models_pull)
+        dl_row.addArrangedSubview_(self._models_dl_btn)
+        b.cur.addArrangedSubview_(dl_row)
+        b.hint("models_download_hint")
+        b.cur.addArrangedSubview_(b.button("ollama_library_btn", "openOllamaLibrary:", 250))
 
     @objc.python_method
     def _set_tooltips(self):
