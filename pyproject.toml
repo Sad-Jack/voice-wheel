@@ -26,6 +26,7 @@ dependencies = [
 dev = [
     "ruff>=0.6",
     "pytest>=8.0",
+    "vulture>=2.11",  # dead-code scan (architecture audits)
 ]
 
 [project.scripts]

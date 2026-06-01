@@ -78,8 +78,7 @@ class MenuBar(NSObject):
         quit_mi.setTarget_(self)
         menu.addItem_(quit_mi)
 
-        self._status_item.setMenu_(menu)
-        self._menu = menu
+        self._status_item.setMenu_(menu)  # the status item retains the menu
         return self
 
     # -- wiring ---------------------------------------------------------------
