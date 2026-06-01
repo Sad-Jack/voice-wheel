@@ -213,7 +213,7 @@ TTS_VOICES = [
 WHEEL_KB_DEFAULT = "cmd+ctrl+z"  # ⌃⌘Z — запись/колесо
 TTS_KB_DEFAULT = "cmd+ctrl+x"    # ⌃⌘X — озвучка
 
-W = 580  # widened from 520 to fit 7 tabs + the per-prompt rule rows comfortably
+W = 640  # widened to fit 8 tabs (incl. «Ключи») + the per-prompt rule rows
 H = 464  # +24 over the original 440 for the top restart banner (the old bottom
          # banner gap was reclaimed, so the window grew less than the banner's height)
 
@@ -445,25 +445,16 @@ class SettingsWindow(NSObject):
             stack[0].addArrangedSubview_(g)
             return g
 
-        # -- Direct API group: provider + key + model (#36/#38) --
+        # -- Direct API group: provider + model. The key lives on the «Ключи» tab. --
         self._grp_api = group()
         prev, stack[0] = stack[0], self._grp_api
         self._provider = popup(["Anthropic", "OpenAI"], w=160)
         self._provider.setTarget_(self)
         self._provider.setAction_("providerChanged:")
         row("provider", self._provider)
-        # masked key (#F4) + a plain mirror toggled by «Показать»
-        self._api_key = NSSecureTextField.alloc().initWithFrame_(NSMakeRect(0, 0, 180, 22))
-        self._api_key.widthAnchor().constraintEqualToConstant_(180).setActive_(True)
-        self._api_key_plain = field(w=180)
-        self._api_key_plain.setHidden_(True)
-        self._api_show = NSButton.checkboxWithTitle_target_action_(
-            T("show_key"), self, "toggleKeyVisibility:"
-        )
-        row("api_key", self._api_key, self._api_key_plain, self._api_show)
         self._api_model = combo(ANTHROPIC_MODELS, w=250)  # provider switch updates the list
         row("model", self._api_model)
-        hint("api_key_hint")
+        hint("keys_pointer")
         stack[0] = prev
 
         # -- Ollama group: pick the model + URL. Downloading, installed list and
@@ -480,11 +471,7 @@ class SettingsWindow(NSObject):
         self._ollama_url = field(w=250)
         row("ollama_url", self._ollama_url)
         hint("ollama_hint")
-        # optional bearer token for a remote/hosted Ollama behind auth (kept in .env)
-        self._ollama_token = NSSecureTextField.alloc().initWithFrame_(NSMakeRect(0, 0, 250, 22))
-        self._ollama_token.widthAnchor().constraintEqualToConstant_(250).setActive_(True)
-        row("ollama_token", self._ollama_token)
-        hint("ollama_token_hint")
+        hint("keys_pointer")  # remote-Ollama token lives on the «Ключи» tab
         hint("llm_models_pointer")
         stack[0] = prev
 
@@ -558,6 +545,28 @@ class SettingsWindow(NSObject):
         stack[0].addArrangedSubview_(self._rules_stack)
         self._add_rule_btn = button("add_rule", "addRule:", 180)
         stack[0].addArrangedSubview_(self._add_rule_btn)
+
+        # ---- Keys tab: every secret in one place (each masked + «Показать»),
+        #      stored in .env. The LLM tab / rules just pick a connection. ----
+        add_tab("tab_keys", scroll=True)
+        header("keys_header")
+        hint("keys_hint")
+        self._key_rows = []
+
+        def key_row(label_key, env_var):
+            secure = NSSecureTextField.alloc().initWithFrame_(NSMakeRect(0, 0, 320, 22))
+            secure.widthAnchor().constraintEqualToConstant_(320).setActive_(True)
+            plain = field(w=320)
+            plain.setHidden_(True)
+            secure.setDelegate_(self)
+            plain.setDelegate_(self)  # both -> controlTextDidChange_ -> dirty
+            show = NSButton.checkboxWithTitle_target_action_(T("show_key"), self, "toggleKeyRow:")
+            self._key_rows.append({"env": env_var, "secure": secure, "plain": plain, "show": show})
+            row(label_key, secure, plain, show)
+
+        key_row("key_anthropic", "ANTHROPIC_API_KEY")
+        key_row("key_openai", "OPENAI_API_KEY")
+        key_row("key_ollama", "OLLAMA_API_KEY")
 
         # ---- Speech (STT) tab ----
         add_tab("tab_stt")
@@ -670,8 +679,7 @@ class SettingsWindow(NSObject):
             rb.setToolTip_(t({"api": "tip_conn_api", "ollama": "tip_conn_ollama",
                               "cc": "tip_conn_cc"}[tkey]))
         pairs = (
-            (self._provider, "tip_provider"), (self._api_key, "tip_api_key"),
-            (self._api_key_plain, "tip_api_key"),
+            (self._provider, "tip_provider"),
             (self._api_model, "tip_model"), (self._ollama, "tip_model"),
             (self._ollama_url, "tip_ollama_url"), (self._models_pull, "tip_model"),
             (self._cc_model, "tip_model"), (self._stt_backend, "tip_stt_backend"),
@@ -725,9 +733,10 @@ class SettingsWindow(NSObject):
             p.setAction_("markDirty:")
         self._concurrent.setTarget_(self)
         self._concurrent.setAction_("markDirty:")
-        for f in (self._api_key, self._api_key_plain, self._api_model, self._ollama_token,
-                  self._ollama_url, self._cc_model, self._wheel_kb, self._tts_kb):
+        for f in (self._api_model, self._ollama_url, self._cc_model,
+                  self._wheel_kb, self._tts_kb):
             f.setDelegate_(self)  # controlTextDidChange_ fires per keystroke
+        # key fields (Keys tab) already wired in key_row()
 
     @objc.python_method
     def _set_dirty(self, flag):
@@ -739,10 +748,10 @@ class SettingsWindow(NSObject):
 
     @objc.python_method
     def _full_snapshot(self):
-        """The whole form's saveable state — every tab's snapshot + the API key."""
+        """The whole form's saveable state — every tab's snapshot (incl. the keys)."""
         return tuple(
             self._tab_snapshot(t)
-            for t in ("tab_llm", "tab_stt", "tab_voice", "tab_triggers", "tab_lang")
+            for t in ("tab_llm", "tab_keys", "tab_stt", "tab_voice", "tab_triggers", "tab_lang")
         )
 
     @objc.python_method
@@ -911,11 +920,12 @@ class SettingsWindow(NSObject):
         self._ollama_model_value = str(llm.get("ollama_model", "qwen2.5:7b"))
         self._refresh_ollama_model_popup()  # shows the saved model now; the live check adds the rest
         self._ollama_url.setStringValue_(str(llm.get("ollama_url", "http://localhost:11434")))
-        self._ollama_token.setStringValue_(self._read_env().get("OLLAMA_API_KEY", ""))
-        self._set_api_key(self._read_env().get(self._provider_env_var(), ""))
-        self._api_show.setState_(0)
-        self._api_key.setHidden_(False)
-        self._api_key_plain.setHidden_(True)
+        env = self._read_env()  # load every key/token from .env into the Keys tab
+        for e in self._key_rows:
+            self._set_key(e, env.get(e["env"], ""))
+            e["show"].setState_(0)
+            e["secure"].setHidden_(False)
+            e["plain"].setHidden_(True)
         self._apply_conn_visibility()
         self._start_ollama_check()  # populate the Models tab (status + installed list) on open
         stt = data.get("stt", {})
@@ -957,12 +967,12 @@ class SettingsWindow(NSObject):
         elif ctype == "api":
             data["llm"]["backend"] = self._current_backend()  # anthropic | openai
             data["llm"]["model"] = str(self._api_model.stringValue()).strip()
-            self._write_env_key(self._provider_env_var(), self._api_key_value().strip())
         else:  # Claude Code
             data["llm"]["backend"] = "claude_warm"
             data["llm"]["model"] = str(self._cc_model.stringValue()).strip()
-        # optional Ollama bearer token (remote/hosted auth) -> .env, applies at once
-        self._write_env_key("OLLAMA_API_KEY", str(self._ollama_token.stringValue()).strip())
+        # All keys/tokens (Keys tab) -> .env, applied immediately
+        for e in self._key_rows:
+            self._write_env_key(e["env"], self._key_value(e).strip())
         data.setdefault("stt", {})
         data["stt"]["backend"] = str(self._stt_backend.titleOfSelectedItem())
         data["stt"]["model"] = str(self._stt_model.titleOfSelectedItem())
@@ -1030,7 +1040,7 @@ class SettingsWindow(NSObject):
                 log.warning("live-apply failed: %s", exc)
         self._capture_baseline()  # the just-saved form is the new baseline
         # Warn (don't block) if the cloud LLM was chosen but no key is set (#F5).
-        if ctype == "api" and not self._api_key_value().strip():
+        if ctype == "api" and not self._provider_key_value().strip():
             self._note.setStringValue_(self._t("note_api_no_key"))
         else:
             self._note.setStringValue_("")
@@ -1118,30 +1128,42 @@ class SettingsWindow(NSObject):
         self._api_model.setStringValue_(
             self._model_by_provider.get(new_provider) or self._provider_models()[0]
         )
-        self._set_api_key(self._read_env().get(self._provider_env_var(), ""))
         self._recompute_dirty()
 
-    # -- API key field: masked + «Показать» reveal (#F4) ----------------------
+    # -- Keys tab: masked key fields (each + «Показать»), backed by .env -------
 
     @objc.python_method
-    def _api_key_value(self):
-        f = self._api_key_plain if not self._api_key_plain.isHidden() else self._api_key
+    def _key_value(self, entry):
+        f = entry["plain"] if not entry["plain"].isHidden() else entry["secure"]
         return str(f.stringValue())
 
     @objc.python_method
-    def _set_api_key(self, value):
-        self._api_key.setStringValue_(value)
-        self._api_key_plain.setStringValue_(value)
+    def _set_key(self, entry, value):
+        entry["secure"].setStringValue_(value)
+        entry["plain"].setStringValue_(value)
 
-    def toggleKeyVisibility_(self, sender):  # noqa: N802
-        if bool(sender.state()):  # reveal: copy into the plain field and show it
-            self._api_key_plain.setStringValue_(str(self._api_key.stringValue()))
-            self._api_key.setHidden_(True)
-            self._api_key_plain.setHidden_(False)
+    @objc.python_method
+    def _key_entry(self, env_var):
+        return next((e for e in self._key_rows if e["env"] == env_var), None)
+
+    @objc.python_method
+    def _provider_key_value(self):
+        """The key for the currently selected Direct-API provider (from the Keys tab)."""
+        e = self._key_entry(self._provider_env_var())
+        return self._key_value(e) if e else ""
+
+    def toggleKeyRow_(self, sender):  # noqa: N802
+        e = next((e for e in self._key_rows if e["show"] == sender), None)
+        if e is None:
+            return
+        if bool(sender.state()):  # reveal
+            e["plain"].setStringValue_(str(e["secure"].stringValue()))
+            e["secure"].setHidden_(True)
+            e["plain"].setHidden_(False)
         else:  # re-mask
-            self._api_key.setStringValue_(str(self._api_key_plain.stringValue()))
-            self._api_key_plain.setHidden_(True)
-            self._api_key.setHidden_(False)
+            e["secure"].setStringValue_(str(e["plain"].stringValue()))
+            e["plain"].setHidden_(True)
+            e["secure"].setHidden_(False)
 
     # -- Ollama model download (#39) ------------------------------------------
 
@@ -1152,7 +1174,8 @@ class SettingsWindow(NSObject):
 
     @objc.python_method
     def _ollama_token_value(self):
-        return str(self._ollama_token.stringValue()).strip()
+        e = self._key_entry("OLLAMA_API_KEY")  # token now lives on the Keys tab
+        return self._key_value(e).strip() if e else ""
 
     def downloadOllama_(self, _sender):  # noqa: N802
         model = str(self._models_pull.stringValue()).strip()
@@ -1518,9 +1541,11 @@ class SettingsWindow(NSObject):
                 for r in self._rules
             )
             return (self._selected_conn_type(), str(self._provider.titleOfSelectedItem()),
-                    self._api_key_value(), str(self._api_model.stringValue()),
+                    str(self._api_model.stringValue()),
                     str(self._ollama.titleOfSelectedItem() or ""), str(self._ollama_url.stringValue()),
-                    str(self._ollama_token.stringValue()), str(self._cc_model.stringValue()), rules)
+                    str(self._cc_model.stringValue()), rules)
+        if ident == "tab_keys":  # keys/tokens (Keys tab) -> Save reflects edits
+            return tuple(self._key_value(e) for e in self._key_rows)
         if ident == "tab_stt":
             return (str(self._stt_backend.titleOfSelectedItem()),
                     str(self._stt_model.titleOfSelectedItem()),
