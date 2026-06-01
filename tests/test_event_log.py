@@ -54,6 +54,22 @@ def test_jsonl_persists_and_reloads_tail(tmp_path):
     assert restored[0]["sector"] == "clean"
 
 
+def test_file_compacts_when_over_byte_cap(tmp_path):
+    import json
+
+    path = tmp_path / "events.jsonl"
+    # a tiny cap forces compaction on every append; the file must never keep more
+    # than the in-memory tail (maxlen), so it can't grow without bound
+    log = EventLog(path=path, maxlen=10, max_bytes=50)
+    for i in range(50):
+        log.add("dictate", result=f"event-{i}")
+    lines = [ln for ln in path.read_text(encoding="utf-8").splitlines() if ln.strip()]
+    assert len(lines) <= 10                       # bounded to maxlen, not 50
+    assert json.loads(lines[-1])["result"] == "event-49"   # newest survives
+    # and the in-memory view is consistent (newest first)
+    assert log.recent(1)[0]["result"] == "event-49"
+
+
 def test_load_tail_skips_corrupt_lines(tmp_path):
     path = tmp_path / "events.jsonl"
     path.write_text('{"kind": "tts", "text": "ok"}\nnot json\n', encoding="utf-8")
