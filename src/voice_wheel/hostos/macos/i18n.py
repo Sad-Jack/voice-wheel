@@ -20,6 +20,23 @@ STR = {
     "tab_triggers": ("Триггеры", "Triggers"),
     "tab_lang": ("Язык", "Language"),
     "tab_prompts": ("Промпты", "Prompts"),
+    "tab_keys": ("Ключи", "Keys"),
+    "keys_header": ("🔑 Ключи и токены", "🔑 Keys & tokens"),
+    "keys_hint": (
+        "Секреты хранятся в .env (в .gitignore), применяются сразу. Введи ключ — и "
+        "соответствующее подключение станет доступным в LLM и правилах. Anthropic: "
+        "console.anthropic.com → API Keys. OpenAI: platform.openai.com → API keys.",
+        "Secrets are stored in .env (gitignored), applied immediately. Enter a key and "
+        "the matching connection becomes available in LLM and rules. Anthropic: "
+        "console.anthropic.com → API Keys. OpenAI: platform.openai.com → API keys.",
+    ),
+    "key_anthropic": ("Claude (Anthropic)", "Claude (Anthropic)"),
+    "key_openai": ("OpenAI", "OpenAI"),
+    "key_ollama": ("Ollama (токен)", "Ollama (token)"),
+    "keys_pointer": (
+        "Ключи и токены — на вкладке «Ключи».",
+        "Keys & tokens are on the «Keys» tab.",
+    ),
     # LLM tab
     "llm_header": ("🧠 Обработка речи (LLM)", "🧠 Speech processing (LLM)"),
     "engine": ("Движок", "Engine"),
@@ -31,17 +48,10 @@ STR = {
     "conn_ollama": ("Ollama", "Ollama"),
     "conn_cc": ("Claude Code CLI", "Claude Code CLI"),
     "provider": ("Провайдер", "Provider"),
-    "api_key": ("API-ключ", "API key"),
     "show_key": ("Показать", "Show"),
     "note_api_no_key": (
-        "⚠️ Ключ не задан — облачный LLM работать не будет. Добавь ключ.",
-        "⚠️ No key set — the cloud LLM won't work. Add a key.",
-    ),
-    "api_key_hint": (
-        "Ключ хранится в .env (в .gitignore). Anthropic: console.anthropic.com → API Keys. "
-        "OpenAI: platform.openai.com → API keys. Применяется сразу.",
-        "The key is stored in .env (gitignored). Anthropic: console.anthropic.com → API Keys. "
-        "OpenAI: platform.openai.com → API keys. Applies immediately.",
+        "⚠️ Ключ не задан — облачный LLM работать не будет. Добавь ключ на вкладке «Ключи».",
+        "⚠️ No key set — the cloud LLM won't work. Add a key on the «Keys» tab.",
     ),
     "note_ollama_pulled": ("Модель «{}» скачана.", "Model «{}» downloaded."),
     "note_ollama_pull_fail": (
@@ -56,13 +66,6 @@ STR = {
         "The URL can be local or your own remote server; usually left as-is.",
     ),
     "ollama_no_models_btn": ("⚠️ Нет моделей — открыть «Модели»", "⚠️ No models — open «Models»"),
-    "ollama_token": ("Токен (опц.)", "Token (opt.)"),
-    "ollama_token_hint": (
-        "Для удалённой Ollama с авторизацией (заголовок Bearer). Локальной обычно не "
-        "нужен — оставь пустым. Хранится в .env, применяется сразу.",
-        "For a remote Ollama behind auth (Bearer header). A local one usually needs "
-        "none — leave empty. Stored in .env, applies immediately.",
-    ),
     "ollama_checking": ("Проверяю Ollama…", "Checking Ollama…"),
     "ollama_running": ("✅ Ollama запущена", "✅ Ollama is running"),
     "ollama_not_running": (
