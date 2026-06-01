@@ -676,31 +676,8 @@ class SettingsWindow(NSObject):
         hint("models_download_hint")
         stack[0].addArrangedSubview_(button("ollama_library_btn", "openOllamaLibrary:", 250))
 
-        # ---- Prompts tab: the wheel's sectors (count + folder access) and the
-        #      optional per-prompt model rules. Read FRESH from the folder so a
-        #      just-added prompt shows here without a restart (wheel applies on restart).
-        add_tab("tab_prompts", scroll=True)
-        self._sectors = list(load_sectors())
-        header("prompts_header")
-        self._prompts_label = label("", gray=True)
-        stack[0].addArrangedSubview_(self._prompts_label)
-        prompt_btns = NSStackView.alloc().init()
-        prompt_btns.setOrientation_(NSUserInterfaceLayoutOrientationHorizontal)
-        prompt_btns.setSpacing_(8)
-        prompt_btns.addArrangedSubview_(button("open_prompts_folder", "openPromptsFolder:", 230))
-        prompt_btns.addArrangedSubview_(button("refresh_prompts", "refreshPrompts:", 110))
-        stack[0].addArrangedSubview_(prompt_btns)
-        hint("prompts_hint")
-        self._refresh_prompts_label()
-        header("rules_header")
-        hint("rules_hint")
-        self._rules_stack = NSStackView.alloc().init()
-        self._rules_stack.setOrientation_(NSUserInterfaceLayoutOrientationVertical)
-        self._rules_stack.setAlignment_(NSLayoutAttributeLeading)
-        self._rules_stack.setSpacing_(6)
-        stack[0].addArrangedSubview_(self._rules_stack)
-        self._add_rule_btn = button("add_rule", "addRule:", 180)
-        stack[0].addArrangedSubview_(self._add_rule_btn)
+        # ---- Prompts tab ----
+        self._build_prompts(b)
 
         # ---- Keys tab: every secret in one place (each masked + «Показать»),
         #      stored in .env. The LLM tab / rules just pick a connection. ----
@@ -897,6 +874,34 @@ class SettingsWindow(NSObject):
         self._logs_view = tv
         self._logs_timer = None
         self._render_logs()
+
+    @objc.python_method
+    def _build_prompts(self, b):
+        # the wheel's sectors (count + folder access) + optional per-prompt model
+        # rules. Read FRESH from the folder so a just-added prompt shows here without
+        # a restart (the wheel itself applies new prompts on restart).
+        b.add_tab("tab_prompts", scroll=True)
+        self._sectors = list(load_sectors())
+        b.header("prompts_header")
+        self._prompts_label = b.label("", gray=True)
+        b.cur.addArrangedSubview_(self._prompts_label)
+        prompt_btns = NSStackView.alloc().init()
+        prompt_btns.setOrientation_(NSUserInterfaceLayoutOrientationHorizontal)
+        prompt_btns.setSpacing_(8)
+        prompt_btns.addArrangedSubview_(b.button("open_prompts_folder", "openPromptsFolder:", 230))
+        prompt_btns.addArrangedSubview_(b.button("refresh_prompts", "refreshPrompts:", 110))
+        b.cur.addArrangedSubview_(prompt_btns)
+        b.hint("prompts_hint")
+        self._refresh_prompts_label()
+        b.header("rules_header")
+        b.hint("rules_hint")
+        self._rules_stack = NSStackView.alloc().init()
+        self._rules_stack.setOrientation_(NSUserInterfaceLayoutOrientationVertical)
+        self._rules_stack.setAlignment_(NSLayoutAttributeLeading)
+        self._rules_stack.setSpacing_(6)
+        b.cur.addArrangedSubview_(self._rules_stack)
+        self._add_rule_btn = b.button("add_rule", "addRule:", 180)
+        b.cur.addArrangedSubview_(self._add_rule_btn)
 
     @objc.python_method
     def _set_tooltips(self):
