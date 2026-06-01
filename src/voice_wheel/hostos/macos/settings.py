@@ -753,36 +753,7 @@ class SettingsWindow(NSObject):
         self._build_lang(b)
 
         # ---- Logs tab (read-only event feed; newest first, auto-refreshing) ----
-        add_tab("tab_logs")
-        header("logs_header")
-        hint("logs_hint")
-        clear_btn = NSButton.buttonWithTitle_target_action_(
-            T("logs_clear"), self, "clearLogs:"
-        )
-        clear_btn.setControlSize_(1)  # small
-        stack[0].addArrangedSubview_(clear_btn)
-        log_w, log_h = W - 64, H - 250
-        logs_scroll = NSScrollView.alloc().initWithFrame_(NSMakeRect(0, 0, log_w, log_h))
-        logs_scroll.setHasVerticalScroller_(True)
-        logs_scroll.setHasHorizontalScroller_(False)
-        logs_scroll.setAutohidesScrollers_(True)
-        logs_scroll.setBorderType_(2)  # NSBezelBorder — a framed box around the feed
-        logs_scroll.setDrawsBackground_(False)
-        logs_scroll.setTranslatesAutoresizingMaskIntoConstraints_(False)
-        tv = NSTextView.alloc().initWithFrame_(NSMakeRect(0, 0, log_w, log_h))
-        tv.setEditable_(False)
-        tv.setSelectable_(True)            # so the user can copy a line out
-        tv.setRichText_(False)
-        tv.setDrawsBackground_(False)
-        tv.setFont_(NSFont.monospacedSystemFontOfSize_weight_(11, 0))
-        tv.setTextColor_(NSColor.labelColor())
-        logs_scroll.setDocumentView_(tv)
-        logs_scroll.widthAnchor().constraintEqualToConstant_(log_w).setActive_(True)
-        logs_scroll.heightAnchor().constraintEqualToConstant_(log_h).setActive_(True)
-        stack[0].addArrangedSubview_(logs_scroll)
-        self._logs_view = tv
-        self._logs_timer = None
-        self._render_logs()
+        self._build_logs(b)
 
         # ---- always-visible restart banner, pinned to the TOP above the tabs so the
         #      user always knows which settings cost a restart. Fully static (same text
@@ -893,6 +864,39 @@ class SettingsWindow(NSObject):
         self._cap_tts_ms = b.button("catch", "captureTtsMs:", 90)
         self._tts_ms_on = b.trig_row("trig_mouse", self._tts_ms, self._cap_tts_ms)
         b.hint("trig_check_hint")
+
+    @objc.python_method
+    def _build_logs(self, b):
+        b.add_tab("tab_logs")
+        b.header("logs_header")
+        b.hint("logs_hint")
+        clear_btn = NSButton.buttonWithTitle_target_action_(
+            self._t("logs_clear"), self, "clearLogs:"
+        )
+        clear_btn.setControlSize_(1)  # small
+        b.cur.addArrangedSubview_(clear_btn)
+        log_w, log_h = W - 64, H - 250
+        logs_scroll = NSScrollView.alloc().initWithFrame_(NSMakeRect(0, 0, log_w, log_h))
+        logs_scroll.setHasVerticalScroller_(True)
+        logs_scroll.setHasHorizontalScroller_(False)
+        logs_scroll.setAutohidesScrollers_(True)
+        logs_scroll.setBorderType_(2)  # NSBezelBorder — a framed box around the feed
+        logs_scroll.setDrawsBackground_(False)
+        logs_scroll.setTranslatesAutoresizingMaskIntoConstraints_(False)
+        tv = NSTextView.alloc().initWithFrame_(NSMakeRect(0, 0, log_w, log_h))
+        tv.setEditable_(False)
+        tv.setSelectable_(True)            # so the user can copy a line out
+        tv.setRichText_(False)
+        tv.setDrawsBackground_(False)
+        tv.setFont_(NSFont.monospacedSystemFontOfSize_weight_(11, 0))
+        tv.setTextColor_(NSColor.labelColor())
+        logs_scroll.setDocumentView_(tv)
+        logs_scroll.widthAnchor().constraintEqualToConstant_(log_w).setActive_(True)
+        logs_scroll.heightAnchor().constraintEqualToConstant_(log_h).setActive_(True)
+        b.cur.addArrangedSubview_(logs_scroll)
+        self._logs_view = tv
+        self._logs_timer = None
+        self._render_logs()
 
     @objc.python_method
     def _set_tooltips(self):
