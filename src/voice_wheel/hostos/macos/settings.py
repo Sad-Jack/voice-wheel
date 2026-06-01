@@ -46,7 +46,6 @@ from AppKit import (
     NSLayoutAttributeCenterY,
     NSLayoutAttributeLeading,
     NSLayoutConstraint,
-    NSLineBreakByTruncatingTail,
     NSLineBreakByWordWrapping,
     NSPopUpButton,
     NSScrollView,
@@ -214,7 +213,7 @@ TTS_VOICES = [
 WHEEL_KB_DEFAULT = "cmd+ctrl+z"  # ⌃⌘Z — запись/колесо
 TTS_KB_DEFAULT = "cmd+ctrl+x"    # ⌃⌘X — озвучка
 
-W = 520
+W = 580  # widened from 520 to fit 7 tabs + the per-prompt rule rows comfortably
 H = 464  # +24 over the original 440 for the top restart banner (the old bottom
          # banner gap was reclaimed, so the window grew less than the banner's height)
 
@@ -443,63 +442,83 @@ class SettingsWindow(NSObject):
         self._provider.setAction_("providerChanged:")
         row("provider", self._provider)
         # masked key (#F4) + a plain mirror toggled by «Показать»
-        self._api_key = NSSecureTextField.alloc().initWithFrame_(NSMakeRect(0, 0, 200, 22))
-        self._api_key.widthAnchor().constraintEqualToConstant_(200).setActive_(True)
-        self._api_key_plain = field(w=200)
+        self._api_key = NSSecureTextField.alloc().initWithFrame_(NSMakeRect(0, 0, 180, 22))
+        self._api_key.widthAnchor().constraintEqualToConstant_(180).setActive_(True)
+        self._api_key_plain = field(w=180)
         self._api_key_plain.setHidden_(True)
         self._api_show = NSButton.checkboxWithTitle_target_action_(
             T("show_key"), self, "toggleKeyVisibility:"
         )
         row("api_key", self._api_key, self._api_key_plain, self._api_show)
-        self._api_model = combo(ANTHROPIC_MODELS)  # provider switch updates the list
+        self._api_model = combo(ANTHROPIC_MODELS, w=250)  # provider switch updates the list
         row("model", self._api_model)
         hint("api_key_hint")
         stack[0] = prev
 
-        # -- Ollama group: model (with «Download») + URL --
+        # -- Ollama group: pick the model + URL. Downloading, installed list and
+        #    status/restart live on the «Модели» tab (no duplicate controls here). --
         self._grp_ollama = group()
         prev, stack[0] = stack[0], self._grp_ollama
         self._ollama = combo(OLLAMA_MODELS, w=190)
-        self._dl_ollama = button("download", "downloadOllama:", 100)
-        row("model", self._ollama, self._dl_ollama)
-        self._ollama_url = field()
+        row("model", self._ollama)
+        self._ollama_url = field(w=250)
         row("ollama_url", self._ollama_url)
         hint("ollama_hint")
-        # status (#40): checked in the background; shows installed/running + an action
-        self._ollama_state = None
-        self._ollama_status = label("", gray=True)
-        stack[0].addArrangedSubview_(self._ollama_status)
-        self._ollama_action = NSButton.buttonWithTitle_target_action_("", self, "ollamaAction:")
-        self._ollama_action.widthAnchor().constraintEqualToConstant_(200).setActive_(True)
-        # Hidden until a real action is needed (Установить/Запустить) — otherwise an
-        # empty-titled button would show as a mysterious grey box next to «Проверить».
-        self._ollama_action.setHidden_(True)
-        status_btns = NSStackView.alloc().init()
-        status_btns.setOrientation_(NSUserInterfaceLayoutOrientationHorizontal)
-        status_btns.setSpacing_(8)
-        status_btns.addArrangedSubview_(self._ollama_action)
-        status_btns.addArrangedSubview_(button("ollama_recheck_btn", "recheckOllama:", 120))
-        stack[0].addArrangedSubview_(status_btns)
+        hint("llm_models_pointer")
         stack[0] = prev
 
         # -- Claude Code group: model --
         self._grp_cc = group()
         prev, stack[0] = stack[0], self._grp_cc
-        self._cc_model = combo(CC_MODELS)
+        self._cc_model = combo(CC_MODELS, w=250)
         row("model", self._cc_model)
         hint("cc_hint")
         stack[0] = prev
 
-        # ---- prompts = wheel sectors: a live list + folder access. Read FRESH from
-        #      the folder (not the cached sectors()) so a just-added prompt shows here
-        #      without an app restart; the wheel itself still needs a restart — see hint.
+        # ---- Models tab: one place to download & manage local Ollama models
+        #      (live status + restart, installed list, pull). The LLM tab just picks.
+        add_tab("tab_models", scroll=True)
+        header("models_header")
+        self._ollama_state = None
+        self._ollama_status = label("", gray=True)
+        stack[0].addArrangedSubview_(self._ollama_status)
+        self._ollama_action = NSButton.buttonWithTitle_target_action_("", self, "ollamaAction:")
+        self._ollama_action.widthAnchor().constraintEqualToConstant_(200).setActive_(True)
+        self._ollama_action.setHidden_(True)  # only shown for Install/Start
+        st_btns = NSStackView.alloc().init()
+        st_btns.setOrientation_(NSUserInterfaceLayoutOrientationHorizontal)
+        st_btns.setSpacing_(8)
+        st_btns.addArrangedSubview_(self._ollama_action)
+        st_btns.addArrangedSubview_(button("ollama_restart_btn", "restartOllama:", 190))
+        st_btns.addArrangedSubview_(button("ollama_recheck_btn", "recheckOllama:", 110))
+        stack[0].addArrangedSubview_(st_btns)
+        stack[0].addArrangedSubview_(label(T("models_installed_header"), bold=True))
+        # A row per installed model — "• name (size)  [✕]" — so each can be deleted.
+        self._models_installed = NSStackView.alloc().init()
+        self._models_installed.setOrientation_(NSUserInterfaceLayoutOrientationVertical)
+        self._models_installed.setAlignment_(NSLayoutAttributeLeading)
+        self._models_installed.setSpacing_(4)
+        self._installed_rows = []
+        stack[0].addArrangedSubview_(self._models_installed)
+        stack[0].addArrangedSubview_(label(T("models_download_header"), bold=True))
+        self._models_pull = combo(OLLAMA_MODELS, w=220)
+        self._models_dl_btn = button("models_pull_btn", "downloadOllama:", 110)
+        dl_row = NSStackView.alloc().init()
+        dl_row.setOrientation_(NSUserInterfaceLayoutOrientationHorizontal)
+        dl_row.setSpacing_(8)
+        dl_row.addArrangedSubview_(self._models_pull)
+        dl_row.addArrangedSubview_(self._models_dl_btn)
+        stack[0].addArrangedSubview_(dl_row)
+        hint("models_download_hint")
+        stack[0].addArrangedSubview_(button("ollama_library_btn", "openOllamaLibrary:", 250))
+
+        # ---- Prompts tab: the wheel's sectors (count + folder access) and the
+        #      optional per-prompt model rules. Read FRESH from the folder so a
+        #      just-added prompt shows here without a restart (wheel applies on restart).
+        add_tab("tab_prompts", scroll=True)
         self._sectors = list(load_sectors())
         header("prompts_header")
         self._prompts_label = label("", gray=True)
-        self._prompts_label.setUsesSingleLineMode_(False)
-        self._prompts_label.setLineBreakMode_(NSLineBreakByWordWrapping)
-        self._prompts_label.setMaximumNumberOfLines_(0)
-        self._prompts_label.setPreferredMaxLayoutWidth_(W - 68)
         stack[0].addArrangedSubview_(self._prompts_label)
         prompt_btns = NSStackView.alloc().init()
         prompt_btns.setOrientation_(NSUserInterfaceLayoutOrientationHorizontal)
@@ -509,7 +528,6 @@ class SettingsWindow(NSObject):
         stack[0].addArrangedSubview_(prompt_btns)
         hint("prompts_hint")
         self._refresh_prompts_label()
-
         header("rules_header")
         hint("rules_hint")
         self._rules_stack = NSStackView.alloc().init()
@@ -601,10 +619,14 @@ class SettingsWindow(NSObject):
         root.addSubview_(reset_btn)
 
         self._note = NSTextField.labelWithString_("")
-        self._note.setFrame_(NSMakeRect(120, 15, W - 260, 18))
+        # Sits between Reset (left) and Save (right); wraps to 2 lines so longer
+        # status messages (downloading, errors, refresh notes) aren't truncated.
+        self._note.setFrame_(NSMakeRect(116, 8, W - 250, 32))
         self._note.setFont_(NSFont.systemFontOfSize_(11))
         self._note.setTextColor_(NSColor.secondaryLabelColor())
-        self._note.setLineBreakMode_(NSLineBreakByTruncatingTail)  # «…» instead of clipping
+        self._note.setUsesSingleLineMode_(False)
+        self._note.setLineBreakMode_(NSLineBreakByWordWrapping)
+        self._note.setMaximumNumberOfLines_(2)
         root.addSubview_(self._note)
 
         self._save_btn = NSButton.buttonWithTitle_target_action_(T("save"), self, "save:")
@@ -629,7 +651,7 @@ class SettingsWindow(NSObject):
             (self._provider, "tip_provider"), (self._api_key, "tip_api_key"),
             (self._api_key_plain, "tip_api_key"),
             (self._api_model, "tip_model"), (self._ollama, "tip_model"),
-            (self._ollama_url, "tip_ollama_url"), (self._dl_ollama, "tip_download"),
+            (self._ollama_url, "tip_ollama_url"), (self._models_pull, "tip_model"),
             (self._cc_model, "tip_model"), (self._stt_backend, "tip_stt_backend"),
             (self._stt_model, "tip_stt_model"), (self._lang, "tip_stt_lang"),
             (self._tts_enabled, "tip_tts_enabled"), (self._tts_voice, "tip_tts_voice"),
@@ -649,10 +671,7 @@ class SettingsWindow(NSObject):
 
     @objc.python_method
     def _refresh_prompts_label(self):
-        labels = [s.label for s in self._sectors]
-        prefix = self._t("prompts_list_prefix")
-        body = " · ".join(labels) if labels else "—"
-        self._prompts_label.setStringValue_(f"{prefix} ({len(labels)}): {body}")
+        self._prompts_label.setStringValue_(self._t("prompts_count").format(len(self._sectors)))
 
     def openPromptsFolder_(self, _sender):  # noqa: N802
         from AppKit import NSWorkspace
@@ -874,8 +893,7 @@ class SettingsWindow(NSObject):
         self._api_key.setHidden_(False)
         self._api_key_plain.setHidden_(True)
         self._apply_conn_visibility()
-        if ctype == "ollama":
-            self._start_ollama_check()
+        self._start_ollama_check()  # populate the Models tab (status + installed list) on open
         stt = data.get("stt", {})
         self._stt_backend.selectItemWithTitle_(stt.get("backend", "auto"))
         self._stt_model.selectItemWithTitle_(str(stt.get("model", "small")))
@@ -1102,51 +1120,83 @@ class SettingsWindow(NSObject):
     # -- Ollama model download (#39) ------------------------------------------
 
     def downloadOllama_(self, _sender):  # noqa: N802
-        model = str(self._ollama.stringValue()).strip()
+        model = str(self._models_pull.stringValue()).strip()
         if not model:
             return
-        self._note.setStringValue_(self._t("note_ollama_pull").format(model))
-        threading.Thread(target=self._pull_ollama, args=(model,), daemon=True).start()
+        url = str(self._ollama_url.stringValue()).strip() or "http://localhost:11434"
+        self._models_dl_btn.setEnabled_(False)
+        self._note.setStringValue_(self._t("models_downloading").format(model))
+        threading.Thread(target=self._pull_ollama, args=(model, url), daemon=True).start()
 
     @objc.python_method
-    def _pull_ollama(self, model):
-        import subprocess
+    def _pull_ollama(self, model, url):
+        """Stream the pull from Ollama's /api/pull so we can show live % progress.
+        Each JSON line carries total/completed bytes; we push the percent to the note
+        on the main thread, throttled to whole-percent changes."""
+        import requests
 
-        ok = False
+        ok, error, last_pct = False, False, -1
         try:
-            proc = subprocess.run(
-                ["ollama", "pull", model], capture_output=True, text=True, timeout=1800
-            )
-            ok = proc.returncode == 0
-            if not ok:
-                log.warning("ollama pull %s: %s", model, (proc.stderr or proc.stdout or "")[:200])
-        except Exception as exc:  # noqa: BLE001 - ollama missing / not running / timeout
+            with requests.post(f"{url}/api/pull", json={"model": model, "stream": True},
+                               stream=True, timeout=(5, 1800)) as r:
+                r.raise_for_status()
+                for raw in r.iter_lines():
+                    if not raw:
+                        continue
+                    try:
+                        obj = json.loads(raw)
+                    except ValueError:
+                        continue
+                    if obj.get("error"):
+                        log.warning("ollama pull %s: %s", model, obj.get("error"))
+                        error = True
+                        break
+                    total, done = obj.get("total") or 0, obj.get("completed") or 0
+                    if total:
+                        pct = int(done * 100 / total)
+                        if pct != last_pct:
+                            last_pct = pct
+                            self._pull_progress = (model, pct, done / 1e9, total / 1e9)
+                            self.performSelectorOnMainThread_withObject_waitUntilDone_(
+                                "ollamaPullProgress:", None, False)
+            ok = not error
+        except Exception as exc:  # noqa: BLE001 - ollama down / network / timeout
             log.warning("ollama pull %s failed: %s", model, exc)
+            ok = False
         self._pull_result = (ok, model)
         self.performSelectorOnMainThread_withObject_waitUntilDone_("ollamaPullDone:", None, False)
 
+    def ollamaPullProgress_(self, _arg):  # noqa: N802
+        model, pct, done_gb, total_gb = self._pull_progress
+        self._note.setStringValue_(
+            self._t("models_downloading_pct").format(model, pct, done_gb, total_gb)
+        )
+
     def ollamaPullDone_(self, _arg):  # noqa: N802
         ok, model = self._pull_result
+        self._models_dl_btn.setEnabled_(True)
         self._note.setStringValue_(
             self._t("note_ollama_pulled" if ok else "note_ollama_pull_fail").format(model)
         )
-        if ok:  # make sure the freshly-pulled model is offered in the dropdown
-            have = [str(self._ollama.itemObjectValueAtIndex_(i))
-                    for i in range(self._ollama.numberOfItems())]
+        if ok:
+            have = [str(self._models_pull.itemObjectValueAtIndex_(i))
+                    for i in range(self._models_pull.numberOfItems())]
             if model not in have:
-                self._ollama.addItemWithObjectValue_(model)
+                self._models_pull.addItemWithObjectValue_(model)
+            self._start_ollama_check()  # refresh installed list, status, and the LLM picker
 
-    # -- Ollama install / running status (#40) --------------------------------
+    # -- Ollama status / install / restart (Models tab) -----------------------
 
     def recheckOllama_(self, _sender):  # noqa: N802
         self._start_ollama_check()
 
     @objc.python_method
     def _start_ollama_check(self):
-        """Probe (in the background) whether Ollama is installed and running, then
-        reflect it in the status line + the context action button."""
+        """Probe (in the background) whether Ollama is installed/running, its version
+        and which models are installed, then reflect it on the Models tab."""
         self._ollama_status.setStringValue_(self._t("ollama_checking"))
         self._ollama_status.setTextColor_(NSColor.secondaryLabelColor())
+        self._set_installed_message(self._t("models_installed_loading"))
         url = str(self._ollama_url.stringValue()).strip() or "http://localhost:11434"
         threading.Thread(target=self._check_ollama, args=(url,), daemon=True).start()
 
@@ -1158,25 +1208,38 @@ class SettingsWindow(NSObject):
         installed = shutil.which("ollama") is not None or any(
             os.path.exists(p) for p in ("/usr/local/bin/ollama", "/opt/homebrew/bin/ollama")
         )
-        running = False
+        running, version, models = False, "", []
         try:
             import requests
 
-            requests.get(f"{url}/api/tags", timeout=1.5)
+            tags = requests.get(f"{url}/api/tags", timeout=1.5)
             running = True
+            models = [(str(m.get("name", "")), int(m.get("size", 0)))
+                      for m in (tags.json().get("models") or [])]
+            try:
+                version = str(requests.get(f"{url}/api/version", timeout=1.5).json().get("version", ""))
+            except Exception:  # noqa: BLE001 - version is a nice-to-have
+                version = ""
         except Exception:  # noqa: BLE001 - any failure = not reachable
             running = False
         self._ollama_state = "running" if running else ("not_running" if installed else "not_installed")
+        self._ollama_version = version
+        self._ollama_models = sorted(models)
         self.performSelectorOnMainThread_withObject_waitUntilDone_("ollamaStatusUpdated:", None, False)
 
     def ollamaStatusUpdated_(self, _arg):  # noqa: N802
-        text_key, color = {
-            "running": ("ollama_running", NSColor.systemGreenColor()),
-            "not_running": ("ollama_not_running", NSColor.systemOrangeColor()),
-            "not_installed": ("ollama_not_installed", NSColor.systemRedColor()),
-        }.get(self._ollama_state, ("ollama_checking", NSColor.secondaryLabelColor()))
-        self._ollama_status.setStringValue_(self._t(text_key))
-        self._ollama_status.setTextColor_(color)
+        version = getattr(self, "_ollama_version", "")
+        if self._ollama_state == "running" and version:
+            self._ollama_status.setStringValue_(self._t("ollama_running_v").format(version))
+            self._ollama_status.setTextColor_(NSColor.systemGreenColor())
+        else:
+            text_key, color = {
+                "running": ("ollama_running", NSColor.systemGreenColor()),
+                "not_running": ("ollama_not_running", NSColor.systemOrangeColor()),
+                "not_installed": ("ollama_not_installed", NSColor.systemRedColor()),
+            }.get(self._ollama_state, ("ollama_checking", NSColor.secondaryLabelColor()))
+            self._ollama_status.setStringValue_(self._t(text_key))
+            self._ollama_status.setTextColor_(color)
         if self._ollama_state == "not_installed":
             self._ollama_action.setTitle_(self._t("ollama_install_btn"))
             self._ollama_action.setHidden_(False)
@@ -1185,6 +1248,109 @@ class SettingsWindow(NSObject):
             self._ollama_action.setHidden_(False)
         else:
             self._ollama_action.setHidden_(True)
+        self._update_installed_models()
+        if self._ollama_state == "running":
+            self._refresh_ollama_model_combo()
+            for r in getattr(self, "_rules", []):  # rule rows on Ollama -> installed list
+                if self._backend_value(r["engine"]) == "ollama":
+                    self._refresh_rule_model_combo(r)
+
+    @objc.python_method
+    def _refresh_ollama_model_combo(self):
+        """The LLM-tab model picker's dropdown lists only INSTALLED models (downloading
+        lives on the Models tab, so non-downloaded models are no longer offered).
+        Keeps the currently configured value in the editable field."""
+        installed = [name for name, _ in getattr(self, "_ollama_models", [])]
+        cur = str(self._ollama.stringValue())
+        self._ollama.removeAllItems()
+        self._ollama.addItemsWithObjectValues_(installed)
+        self._ollama.setStringValue_(cur)
+
+    @objc.python_method
+    def _clear_installed(self):
+        for v in list(self._models_installed.arrangedSubviews()):
+            self._models_installed.removeView_(v)
+        self._installed_rows = []
+
+    @objc.python_method
+    def _set_installed_message(self, text):
+        self._clear_installed()
+        lab = NSTextField.labelWithString_(text)
+        lab.setFont_(NSFont.systemFontOfSize_(11))
+        lab.setTextColor_(NSColor.secondaryLabelColor())
+        self._models_installed.addArrangedSubview_(lab)
+
+    @objc.python_method
+    def _update_installed_models(self):
+        models = getattr(self, "_ollama_models", [])
+        if self._ollama_state != "running":
+            self._set_installed_message("—")
+            return
+        if not models:
+            self._set_installed_message(self._t("models_installed_none"))
+            return
+
+        def _sz(n):
+            gb = n / 1e9
+            return f"{gb:.1f} GB" if gb >= 0.1 else f"{n / 1e6:.0f} MB"
+
+        self._clear_installed()
+        for name, size in models:
+            h = NSStackView.alloc().init()
+            h.setOrientation_(NSUserInterfaceLayoutOrientationHorizontal)
+            h.setAlignment_(NSLayoutAttributeCenterY)
+            h.setSpacing_(8)
+            lab = NSTextField.labelWithString_(f"• {name}  ({_sz(size)})")
+            lab.setFont_(NSFont.systemFontOfSize_(11))
+            lab.setTextColor_(NSColor.secondaryLabelColor())
+            lab.widthAnchor().constraintEqualToConstant_(260).setActive_(True)  # align the ✕
+            btn = NSButton.buttonWithTitle_target_action_("✕", self, "deleteModel:")
+            btn.widthAnchor().constraintEqualToConstant_(30).setActive_(True)
+            btn.setToolTip_(self._t("model_delete_tip"))
+            h.addArrangedSubview_(lab)
+            h.addArrangedSubview_(btn)
+            self._models_installed.addArrangedSubview_(h)
+            self._installed_rows.append({"model": name, "btn": btn, "row": h})
+
+    def deleteModel_(self, sender):  # noqa: N802
+        from AppKit import NSAlert, NSAlertFirstButtonReturn
+
+        rule = next((r for r in self._installed_rows if r["btn"] == sender), None)
+        if rule is None:
+            return
+        model = rule["model"]
+        alert = NSAlert.alloc().init()
+        alert.setMessageText_(self._t("model_delete_confirm_title").format(model))
+        alert.setInformativeText_(self._t("model_delete_confirm_body"))
+        alert.addButtonWithTitle_(self._t("model_delete_btn"))  # default = Delete
+        alert.addButtonWithTitle_(self._t("cancel"))
+        if alert.runModal() != NSAlertFirstButtonReturn:
+            return
+        sender.setEnabled_(False)
+        self._note.setStringValue_(self._t("model_removing").format(model))
+        threading.Thread(target=self._remove_ollama, args=(model,), daemon=True).start()
+
+    @objc.python_method
+    def _remove_ollama(self, model):
+        import subprocess
+
+        ok = False
+        try:
+            proc = subprocess.run(["ollama", "rm", model], capture_output=True, text=True, timeout=60)
+            ok = proc.returncode == 0
+            if not ok:
+                log.warning("ollama rm %s: %s", model, (proc.stderr or proc.stdout or "")[:200])
+        except Exception as exc:  # noqa: BLE001 - ollama missing / not running / timeout
+            log.warning("ollama rm %s failed: %s", model, exc)
+        self._remove_result = (ok, model)
+        self.performSelectorOnMainThread_withObject_waitUntilDone_("ollamaRemoveDone:", None, False)
+
+    def ollamaRemoveDone_(self, _arg):  # noqa: N802
+        ok, model = self._remove_result
+        self._note.setStringValue_(
+            self._t("model_removed" if ok else "model_remove_fail").format(model)
+        )
+        self._start_ollama_check()  # refresh installed list + status + the model pickers
 
     def ollamaAction_(self, _sender):  # noqa: N802
         if self._ollama_state == "not_installed":
@@ -1197,6 +1363,16 @@ class SettingsWindow(NSObject):
         elif self._ollama_state == "not_running":
             self._note.setStringValue_(self._t("ollama_starting"))
             threading.Thread(target=self._start_ollama_serve, daemon=True).start()
+
+    def restartOllama_(self, _sender):  # noqa: N802
+        self._note.setStringValue_(self._t("ollama_restarting"))
+        threading.Thread(target=self._restart_ollama_serve, daemon=True).start()
+
+    def openOllamaLibrary_(self, _sender):  # noqa: N802
+        from AppKit import NSWorkspace
+        from Foundation import NSURL
+
+        NSWorkspace.sharedWorkspace().openURL_(NSURL.URLWithString_("https://ollama.com/library"))
 
     @objc.python_method
     def _start_ollama_serve(self):
@@ -1211,6 +1387,28 @@ class SettingsWindow(NSObject):
         except Exception as exc:  # noqa: BLE001
             log.warning("ollama serve failed: %s", exc)
         time.sleep(2.0)  # let it bind the port, then re-check on the main thread
+        self.performSelectorOnMainThread_withObject_waitUntilDone_("recheckOllama:", None, False)
+
+    @objc.python_method
+    def _restart_ollama_serve(self):
+        """Restart the Ollama daemon: prefer brew (the usual managed service), else
+        kill + relaunch. Re-checks afterwards so the user sees the state change."""
+        import shutil
+        import subprocess
+        import time
+
+        try:
+            if shutil.which("brew"):
+                subprocess.run(["brew", "services", "restart", "ollama"],
+                               capture_output=True, timeout=60)
+            else:
+                subprocess.run(["pkill", "-x", "ollama"], capture_output=True)
+                time.sleep(1.0)
+                subprocess.Popen(["ollama", "serve"], stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.DEVNULL, start_new_session=True)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("ollama restart failed: %s", exc)
+        time.sleep(2.0)
         self.performSelectorOnMainThread_withObject_waitUntilDone_("recheckOllama:", None, False)
 
     # -- API key storage in .env (#38) ----------------------------------------
@@ -1373,20 +1571,48 @@ class SettingsWindow(NSObject):
         engine.addItemsWithTitles_(self._backend_labels())
         engine.widthAnchor().constraintEqualToConstant_(150).setActive_(True)
         engine.setTarget_(self)
-        engine.setAction_("markDirty:")
+        engine.setAction_("ruleEngineChanged:")  # repopulate the model dropdown + mark dirty
         self._select_backend(engine, backend)
-        model_field = NSTextField.alloc().initWithFrame_(NSMakeRect(0, 0, 110, 22))
-        model_field.widthAnchor().constraintEqualToConstant_(110).setActive_(True)
-        model_field.setStringValue_(str(model or ""))
-        model_field.setDelegate_(self)
+        # editable combo: dropdown lists the engine's models (installed ones for
+        # Ollama), but you can still type a custom name.
+        model_combo = NSComboBox.alloc().initWithFrame_(NSMakeRect(0, 0, 150, 26))
+        model_combo.widthAnchor().constraintEqualToConstant_(150).setActive_(True)
+        model_combo.setCompletes_(True)
+        model_combo.addItemsWithObjectValues_(self._rule_models_for(backend))
+        model_combo.setStringValue_(str(model or ""))
+        model_combo.setDelegate_(self)
         delete = NSButton.buttonWithTitle_target_action_("✕", self, "deleteRule:")
         delete.widthAnchor().constraintEqualToConstant_(32).setActive_(True)
-        for c in (prompt, engine, model_field, delete):
+        for c in (prompt, engine, model_combo, delete):
             h.addArrangedSubview_(c)
         self._rules.append(
-            {"row": h, "prompt": prompt, "engine": engine, "model": model_field, "delete": delete}
+            {"row": h, "prompt": prompt, "engine": engine, "model": model_combo, "delete": delete}
         )
         self._rules_stack.addArrangedSubview_(h)
+
+    @objc.python_method
+    def _rule_models_for(self, backend):
+        """The model suggestions for a rule's chosen engine — installed Ollama models
+        (or the curated defaults if none are known yet), else the per-provider lists."""
+        if backend == "ollama":
+            installed = [name for name, _ in getattr(self, "_ollama_models", [])]
+            return installed or OLLAMA_MODELS
+        return {"anthropic": ANTHROPIC_MODELS, "openai": OPENAI_MODELS,
+                "claude_warm": CC_MODELS, "claude_cli": CC_MODELS}.get(backend, [])
+
+    @objc.python_method
+    def _refresh_rule_model_combo(self, rule):
+        cb = rule["model"]
+        cur = str(cb.stringValue())
+        cb.removeAllItems()
+        cb.addItemsWithObjectValues_(self._rule_models_for(self._backend_value(rule["engine"])))
+        cb.setStringValue_(cur)
+
+    def ruleEngineChanged_(self, sender):  # noqa: N802
+        rule = next((r for r in self._rules if r["engine"] == sender), None)
+        if rule is not None:
+            self._refresh_rule_model_combo(rule)
+        self.markDirty_(sender)
 
     def addRule_(self, _sender):  # noqa: N802
         key = self._first_unassigned()

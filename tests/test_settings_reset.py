@@ -31,7 +31,7 @@ def test_reset_on_default_tab_keeps_save_disabled():
     w._stt_model.selectItemWithTitle_("small")
     w._lang.selectItemWithTitle_("ru")
     w._capture_baseline()  # this is what's saved
-    w._tabs.selectTabViewItemAtIndex_(1)  # Речь
+    w._tabs.selectTabViewItemWithIdentifier_("tab_stt")  # Речь (by id, robust to tab order)
     w.resetCurrentTab_(None)  # reset lands back on the saved values
     assert w._dirty is False
     assert not w._save_btn.isEnabled()
@@ -41,7 +41,7 @@ def test_reset_that_changes_a_value_arms_save():
     w = _window()
     w._stt_model.selectItemWithTitle_("large")  # the saved value is non-default
     w._capture_baseline()
-    w._tabs.selectTabViewItemAtIndex_(1)
+    w._tabs.selectTabViewItemWithIdentifier_("tab_stt")
     w.resetCurrentTab_(None)  # reset -> small, differs from the saved 'large'
     assert w._dirty is True
     assert w._save_btn.isEnabled()
