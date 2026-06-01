@@ -269,6 +269,16 @@ class SettingsWindow(NSObject):
         app.activateIgnoringOtherApps_(True)
         self._window.center()
         self._window.makeKeyAndOrderFront_(None)
+        self.performSelector_withObject_afterDelay_("clearFocus:", None, 0.0)
+
+    def tabView_didSelectTabViewItem_(self, _tab_view, _item):  # noqa: N802
+        # NSTabView auto-focuses the new tab's first text field; drop it so the caret
+        # doesn't land in an input (e.g. «Скачать модель») just from switching tabs.
+        self.performSelector_withObject_afterDelay_("clearFocus:", None, 0.0)
+
+    def clearFocus_(self, _arg):  # noqa: N802
+        if self._window is not None:
+            self._window.makeFirstResponder_(self._window)
 
     # -- build ----------------------------------------------------------------
 
@@ -298,6 +308,7 @@ class SettingsWindow(NSObject):
         tabs = NSTabView.alloc().initWithFrame_(NSMakeRect(10, 54, W - 20, H - 100))
         root.addSubview_(tabs)
         self._tabs = tabs
+        tabs.setDelegate_(self)  # clear auto-focus when a tab is selected (see below)
 
         stack = [None]   # the current tab's vertical NSStackView (Auto-Layout, auto-aligns)
 
