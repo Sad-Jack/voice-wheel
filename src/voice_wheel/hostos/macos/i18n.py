@@ -76,6 +76,22 @@ STR = {
         "Via the installed claude CLI on the Max plan (no key). "
         "Install Claude Code and run claude login.",
     ),
+    "prompts_header": ("🧩 Промпты — секторы колеса", "🧩 Prompts — wheel sectors"),
+    "prompts_list_prefix": ("Сейчас", "Now"),
+    "prompts_hint": (
+        "Каждый файл «N-Название.md» в папке промптов = один сектор колеса (N задаёт "
+        "порядок). Добавь / переименуй / удали файл, затем перезапусти приложение, "
+        "чтобы колесо обновилось. Список здесь обновляется кнопкой «Обновить».",
+        "Each «N-Name.md» file in the prompts folder = one wheel sector (N sets the "
+        "order). Add / rename / delete a file, then restart the app to update the "
+        "wheel. The list here refreshes with «Refresh».",
+    ),
+    "open_prompts_folder": ("📂 Открыть папку промптов", "📂 Open prompts folder"),
+    "refresh_prompts": ("Обновить", "Refresh"),
+    "prompts_refreshed": (
+        "Список промптов обновлён. Колесо обновится после перезапуска приложения.",
+        "Prompt list refreshed. The wheel updates after an app restart.",
+    ),
     "rules_header": ("🎛 Модель на промпт — правила (опц.)", "🎛 Per-prompt model — rules (opt.)"),
     "rules_hint": (
         "Базовая (выше) — для всех промптов. Правило задаёт свою модель отдельному.",

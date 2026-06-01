@@ -72,7 +72,7 @@ from ...core.config import (
     read_env,
     write_env_key,
 )
-from ...core.modes import sectors
+from ...core.modes import load_sectors, prompts_dir
 from .i18n import detect_ui_lang, resolve_lang
 from .i18n import t as _tr
 
@@ -490,9 +490,28 @@ class SettingsWindow(NSObject):
         hint("cc_hint")
         stack[0] = prev
 
+        # ---- prompts = wheel sectors: a live list + folder access. Read FRESH from
+        #      the folder (not the cached sectors()) so a just-added prompt shows here
+        #      without an app restart; the wheel itself still needs a restart — see hint.
+        self._sectors = list(load_sectors())
+        header("prompts_header")
+        self._prompts_label = label("", gray=True)
+        self._prompts_label.setUsesSingleLineMode_(False)
+        self._prompts_label.setLineBreakMode_(NSLineBreakByWordWrapping)
+        self._prompts_label.setMaximumNumberOfLines_(0)
+        self._prompts_label.setPreferredMaxLayoutWidth_(W - 68)
+        stack[0].addArrangedSubview_(self._prompts_label)
+        prompt_btns = NSStackView.alloc().init()
+        prompt_btns.setOrientation_(NSUserInterfaceLayoutOrientationHorizontal)
+        prompt_btns.setSpacing_(8)
+        prompt_btns.addArrangedSubview_(button("open_prompts_folder", "openPromptsFolder:", 230))
+        prompt_btns.addArrangedSubview_(button("refresh_prompts", "refreshPrompts:", 110))
+        stack[0].addArrangedSubview_(prompt_btns)
+        hint("prompts_hint")
+        self._refresh_prompts_label()
+
         header("rules_header")
         hint("rules_hint")
-        self._sectors = list(sectors())
         self._rules_stack = NSStackView.alloc().init()
         self._rules_stack.setOrientation_(NSUserInterfaceLayoutOrientationVertical)
         self._rules_stack.setAlignment_(NSLayoutAttributeLeading)
@@ -625,6 +644,33 @@ class SettingsWindow(NSObject):
         )
         for ctl, key in pairs:
             ctl.setToolTip_(t(key))
+
+    # -- prompts (= wheel sectors) --------------------------------------------
+
+    @objc.python_method
+    def _refresh_prompts_label(self):
+        labels = [s.label for s in self._sectors]
+        prefix = self._t("prompts_list_prefix")
+        body = " · ".join(labels) if labels else "—"
+        self._prompts_label.setStringValue_(f"{prefix} ({len(labels)}): {body}")
+
+    def openPromptsFolder_(self, _sender):  # noqa: N802
+        from AppKit import NSWorkspace
+        from Foundation import NSURL
+
+        d = prompts_dir()
+        try:
+            d.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:  # noqa: BLE001 - best effort
+            log.warning("prompts folder open: %s", exc)
+        NSWorkspace.sharedWorkspace().openURL_(NSURL.fileURLWithPath_(str(d)))
+
+    def refreshPrompts_(self, _sender):  # noqa: N802
+        """Re-read the prompts folder so a just-added file shows in the list (and is
+        assignable in a new rule) without restarting. The wheel applies on restart."""
+        self._sectors = list(load_sectors())
+        self._refresh_prompts_label()
+        self._note.setStringValue_(self._t("prompts_refreshed"))
 
     # -- dirty tracking (Save button reflects unsaved changes) ----------------
 
