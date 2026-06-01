@@ -65,10 +65,18 @@ STR = {
     ),
     "ollama_url": ("URL", "URL"),
     "ollama_hint": (
-        "Модель через Ollama — должна быть установлена и запущена (ollama serve). "
-        "URL — локальный или свой сервер; обычно не трогаем.",
-        "A model via Ollama — it must be installed and running (ollama serve). "
-        "The URL can be local or your own remote server; usually left as-is.",
+        "Модель через Ollama — должна быть установлена и запущена. Адрес сервера "
+        "(URL) и проверка доступности — на вкладке «Модели».",
+        "A model via Ollama — it must be installed and running. The server address "
+        "(URL) and the reachability check live on the «Models» tab.",
+    ),
+    "ollama_url_hint": (
+        "Адрес Ollama-сервера, к которому обращаемся: локальный (по умолчанию "
+        "http://localhost:11434) или свой удалённый. «Проверить» — пингует адрес и "
+        "показывает статус ниже (доступен / нет).",
+        "The Ollama server we talk to: local (default http://localhost:11434) or your "
+        "own remote one. «Re-check» pings the address and shows the status below "
+        "(reachable / not).",
     ),
     "ollama_no_models_btn": ("⚠️ Нет моделей — открыть «Модели»", "⚠️ No models — open «Models»"),
     "ollama_checking": ("Проверяю Ollama…", "Checking Ollama…"),
@@ -126,10 +134,19 @@ STR = {
         "Downloading and the installed-models list live on the «Models» tab.",
     ),
     "cc_hint": (
-        "Через установленный claude CLI на подписке Max (без ключа). "
-        "Установи Claude Code и выполни claude login.",
-        "Via the installed claude CLI on the Max plan (no key). "
-        "Install Claude Code and run claude login.",
+        "Зовём локальный `claude` (Claude Code) на твоей подписке Pro/Max — без ключа. "
+        "Нужны установка и вход (кнопки ниже).",
+        "Calls the local `claude` (Claude Code) on your Pro/Max plan — no key. Needs "
+        "install + login (buttons below).",
+    ),
+    "claude_checking": ("Проверяю Claude Code…", "Checking Claude Code…"),
+    "claude_ok": ("🟢 Claude Code установлен ({})", "🟢 Claude Code installed ({})"),
+    "claude_missing": ("🔴 Claude Code не установлен", "🔴 Claude Code not installed"),
+    "cc_install_btn": ("Как установить…", "How to install…"),
+    "cc_login_btn": ("Войти / настроить (Терминал)", "Log in / set up (Terminal)"),
+    "cc_login_note": (
+        "Открыл Терминал — войди там (откроется браузер). После входа нажми «Проверить».",
+        "Opened Terminal — log in there (a browser opens). Then click «Re-check».",
     ),
     "prompts_header": ("🧩 Промпты — секторы колеса", "🧩 Prompts — wheel sectors"),
     "prompts_count": ("Сейчас промптов: {}", "Prompts now: {}"),
@@ -147,12 +164,14 @@ STR = {
         "Список промптов обновлён. Колесо обновится после перезапуска приложения.",
         "Prompt list refreshed. The wheel updates after an app restart.",
     ),
-    "rules_header": ("🎛 Модель на промпт — правила (опц.)", "🎛 Per-prompt model — rules (opt.)"),
+    "rules_header": ("🎛 Модель на каждый промпт", "🎛 Model per prompt"),
     "rules_hint": (
-        "Базовая (выше) — для всех промптов. Правило задаёт свою модель отдельному.",
-        "Base (above) applies to every prompt. A rule sets a separate model for one.",
+        "Каждый промпт по умолчанию использует базовую модель (вкладка LLM). Раскрой "
+        "промпт, чтобы задать ему свою модель; оставишь как базовую — будет наследовать её.",
+        "Every prompt uses the base model (LLM tab) by default. Expand a prompt to give "
+        "it its own model; leave it as base and it keeps inheriting the base.",
     ),
-    "add_rule": ("+ Добавить правило", "+ Add rule"),
+    "prompt_inherits_base": ("как базовая", "as base"),
     "reset_tab": ("Сброс", "Reset"),
     # Speech tab
     "stt_header": ("🎙 Распознавание (речь → текст)", "🎙 Recognition (speech → text)"),

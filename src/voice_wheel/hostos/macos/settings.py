@@ -722,9 +722,9 @@ class SettingsWindow(NSObject):
 
     @objc.python_method
     def _build_prompts(self, b):
-        # the wheel's sectors (count + folder access) + optional per-prompt model
-        # rules. Read FRESH from the folder so a just-added prompt shows here without
-        # a restart (the wheel itself applies new prompts on restart).
+        # the wheel's sectors (count + folder access) + one collapsible model row per
+        # prompt (built in _load, pre-filled from the base). Read FRESH from the folder
+        # so a just-added prompt shows here without a restart (wheel applies on restart).
         b.add_tab("tab_prompts", scroll=True)
         self._sectors = list(load_sectors())
         b.header("prompts_header")
@@ -745,8 +745,7 @@ class SettingsWindow(NSObject):
         self._rules_stack.setAlignment_(NSLayoutAttributeLeading)
         self._rules_stack.setSpacing_(6)
         b.cur.addArrangedSubview_(self._rules_stack)
-        self._add_rule_btn = b.button("add_rule", "addRule:", 180)
-        b.cur.addArrangedSubview_(self._add_rule_btn)
+        self._rebuild_prompt_rows()  # one row per prompt (base for now; _load applies overrides)
 
     @objc.python_method
     def _build_models(self, b):
@@ -754,6 +753,12 @@ class SettingsWindow(NSObject):
         # installed list, pull). The LLM tab just picks.
         b.add_tab("tab_models", scroll=True)
         b.header("models_header")
+        # WHICH Ollama server to talk to (set first), with a reachability check whose
+        # result shows in the status line right below. Local or your own remote server.
+        self._ollama_url = b.field(w=260)
+        b.row("ollama_url", self._ollama_url,
+              b.button("ollama_recheck_btn", "recheckOllama:", 120))
+        b.hint("ollama_url_hint")
         self._ollama_state = None
         self._ollama_status = b.label("", gray=True)
         b.cur.addArrangedSubview_(self._ollama_status)
@@ -765,7 +770,6 @@ class SettingsWindow(NSObject):
         st_btns.setSpacing_(8)
         st_btns.addArrangedSubview_(self._ollama_action)
         st_btns.addArrangedSubview_(b.button("ollama_restart_btn", "restartOllama:", 190))
-        st_btns.addArrangedSubview_(b.button("ollama_recheck_btn", "recheckOllama:", 110))
         b.cur.addArrangedSubview_(st_btns)
         b.cur.addArrangedSubview_(b.label(self._t("models_installed_header"), bold=True))
         # A row per installed model — "• name (size)  [✕]" — so each can be deleted.
@@ -869,16 +873,26 @@ class SettingsWindow(NSObject):
         self._ollama_none_btn = b.button("ollama_no_models_btn", "openModelsTab:", 300)
         self._ollama_none_btn.setHidden_(True)
         b.row("model", self._ollama, self._ollama_none_btn)
-        self._ollama_url = b.field(w=250)
-        b.row("ollama_url", self._ollama_url)
-        b.hint("ollama_hint")
+        b.hint("ollama_hint")  # URL + reachability now live on the «Модели» tab
         b.hint("keys_pointer")  # remote-Ollama token lives on the «Ключи» tab
         b.hint("llm_models_pointer")
         b.cur = prev
 
-        # -- Claude Code group: model --
+        # -- Claude Code group: status + install/login + model --
         self._grp_cc = b.group()
         prev, b.cur = b.cur, self._grp_cc
+        self._cc_state = None  # None=unknown · "ok" · "missing"
+        self._cc_status = b.label("", gray=True)
+        b.cur.addArrangedSubview_(self._cc_status)
+        # contextual: «Как установить…» (missing) or «Войти / настроить» (installed)
+        self._cc_action = NSButton.buttonWithTitle_target_action_("", self, "claudeAction:")
+        self._cc_action.setHidden_(True)
+        cc_btns = NSStackView.alloc().init()
+        cc_btns.setOrientation_(NSUserInterfaceLayoutOrientationHorizontal)
+        cc_btns.setSpacing_(8)
+        cc_btns.addArrangedSubview_(self._cc_action)
+        cc_btns.addArrangedSubview_(b.button("ollama_recheck_btn", "recheckClaude:", 120))
+        b.cur.addArrangedSubview_(cc_btns)
         self._cc_model = b.combo(CC_MODELS, w=250)
         b.row("model", self._cc_model)
         b.hint("cc_hint")
@@ -1010,7 +1024,6 @@ class SettingsWindow(NSObject):
             import time as _time
             self._key_checked_at[edited["env"]] = _time.time()
             self._refresh_api_availability()
-            self._refresh_rule_engines()
             self._refresh_key_status()
         self._recompute_dirty()
 
@@ -1155,6 +1168,7 @@ class SettingsWindow(NSObject):
         self._apply_conn_visibility()
         self._refresh_api_availability()  # offer only providers whose key is set
         self._start_ollama_check()  # populate the Models tab (status + installed list) on open
+        self._start_claude_check()  # populate the Claude Code group's install status
         stt = data.get("stt", {})
         self._stt_backend.selectItemWithTitle_(stt.get("backend", "auto"))
         self._stt_model.selectItemWithTitle_(str(stt.get("model", "small")))
@@ -1169,14 +1183,9 @@ class SettingsWindow(NSObject):
         self._tts_enabled.setState_(1 if tts.get("enabled", True) else 0)
         self._refresh_trigger_states()
         self._concurrent.setState_(1 if data.get("concurrent", False) else 0)
-        for r in list(self._rules):   # clear any existing rule rows
-            self._rules_stack.removeView_(r["row"])
-        self._rules = []
-        for key, ov in (data.get("sector_models") or {}).items():
-            if isinstance(ov, dict):  # skip the "_comment" string
-                self._make_rule_row(key, ov.get("backend", "ollama"), ov.get("model", ""))
-        self._refresh_rule_engines()  # grey out engines whose key isn't set
-        self._refresh_add_button()
+        overrides = {k: v for k, v in (data.get("sector_models") or {}).items()
+                     if isinstance(v, dict)}  # skip the "_comment" string
+        self._rebuild_prompt_rows(overrides)
         self._note.setStringValue_("")
         self._capture_baseline()
 
@@ -1223,15 +1232,15 @@ class SettingsWindow(NSObject):
         if backend == "piper":
             data["tts"]["piper_voice"] = piper_voice
         data["concurrent"] = bool(self._concurrent.state())
-        # per-prompt model rules -> sector_models
+        # per-prompt model -> sector_models. Only rows that DIFFER from the base are
+        # written; a row left equal to the base inherits it (nothing saved).
         sm = {}
+        base = (self._current_backend(), self._current_model().strip())
         for r in self._rules:
-            key = self._rule_sector_key(r)
-            if key:
-                sm[key] = {
-                    "backend": self._backend_value(r["engine"]),
-                    "model": str(r["model"].stringValue()).strip(),
-                }
+            backend = self._prompt_row_backend(r)
+            model = str(r["model"].stringValue()).strip()
+            if model and (backend, model) != base:
+                sm[r["sector_key"]] = {"backend": backend, "model": model}
         existing = data.get("sector_models")
         if isinstance(existing, dict) and "_comment" in existing:
             sm["_comment"] = existing["_comment"]
@@ -1277,21 +1286,6 @@ class SettingsWindow(NSObject):
 
     # -- LLM backend helpers (index-mapped so translated labels are safe) ------
 
-    @objc.python_method
-    def _backend_labels(self):
-        idx = 0 if self._uilang == "ru" else 1
-        return [pair[idx] for _v, pair in LLM_BACKENDS]
-
-    @objc.python_method
-    def _select_backend(self, popup, value):
-        i = next((i for i, (v, _p) in enumerate(LLM_BACKENDS) if v == value), 0)
-        popup.selectItemAtIndex_(i)
-
-    @objc.python_method
-    def _backend_value(self, popup):
-        i = int(popup.indexOfSelectedItem())
-        return LLM_BACKENDS[i][0] if 0 <= i < len(LLM_BACKENDS) else "ollama"
-
     # -- connection type (#36): radios + per-type setting groups --------------
 
     @objc.python_method
@@ -1333,8 +1327,11 @@ class SettingsWindow(NSObject):
         for rb, _ in self._conn_radios:
             rb.setState_(1 if rb == sender else 0)
         self._apply_conn_visibility()
-        if self._selected_conn_type() == "ollama":
+        t = self._selected_conn_type()
+        if t == "ollama":
             self._start_ollama_check()
+        elif t == "cc":
+            self._start_claude_check()
         self._recompute_dirty()
 
     @objc.python_method
@@ -1459,16 +1456,6 @@ class SettingsWindow(NSObject):
         else:
             self._provider.selectItemWithTitle_(cur)
 
-    @objc.python_method
-    def _set_rule_engine_availability(self, engine_popup):
-        for i, (val, _lbl) in enumerate(LLM_BACKENDS):
-            engine_popup.itemAtIndex_(i).setEnabled_(self._backend_available(val))
-
-    @objc.python_method
-    def _refresh_rule_engines(self):
-        for r in getattr(self, "_rules", []):
-            self._set_rule_engine_availability(r["engine"])
-
     def openKeysTab_(self, _sender):  # noqa: N802
         self._tabs.selectTabViewItemWithIdentifier_("tab_keys")
 
@@ -1584,6 +1571,70 @@ class SettingsWindow(NSObject):
     def recheckOllama_(self, _sender):  # noqa: N802
         self._start_ollama_check()
 
+    # -- Claude Code CLI: detect install + offer install/login -----------------
+
+    def recheckClaude_(self, _sender):  # noqa: N802
+        self._start_claude_check()
+
+    @objc.python_method
+    def _start_claude_check(self):
+        """Probe (in the background) whether the `claude` CLI is installed + its
+        version, then reflect it on the LLM tab's Claude Code group."""
+        self._cc_status.setStringValue_(self._t("claude_checking"))
+        self._cc_status.setTextColor_(NSColor.secondaryLabelColor())
+        threading.Thread(target=self._check_claude, daemon=True).start()
+
+    @objc.python_method
+    def _check_claude(self):
+        import os
+        import shutil
+        import subprocess
+        path = shutil.which("claude") or os.path.expanduser("~/.local/bin/claude")
+        version = ""
+        if os.path.exists(path):
+            try:
+                r = subprocess.run([path, "--version"], capture_output=True, text=True, timeout=8)
+                if r.returncode == 0:
+                    version = (r.stdout or "").strip().split()[0]
+            except Exception:  # noqa: BLE001 - best-effort version probe
+                version = "?"
+        self._claude_check = (bool(version) or os.path.exists(path), version)
+        self.performSelectorOnMainThread_withObject_waitUntilDone_(
+            "claudeStatusUpdated:", None, False)
+
+    def claudeStatusUpdated_(self, _arg):  # noqa: N802
+        installed, version = getattr(self, "_claude_check", (False, ""))
+        if installed:
+            self._cc_state = "ok"
+            self._cc_status.setStringValue_(self._t("claude_ok").format(version or "—"))
+            self._cc_status.setTextColor_(NSColor.systemGreenColor())
+            self._cc_action.setTitle_(self._t("cc_login_btn"))
+            self._cc_action.setHidden_(False)
+        else:
+            self._cc_state = "missing"
+            self._cc_status.setStringValue_(self._t("claude_missing"))
+            self._cc_status.setTextColor_(NSColor.systemRedColor())
+            self._cc_action.setTitle_(self._t("cc_install_btn"))
+            self._cc_action.setHidden_(False)
+
+    def claudeAction_(self, _sender):  # noqa: N802
+        if self._cc_state == "missing":
+            from AppKit import NSWorkspace
+            from Foundation import NSURL
+            NSWorkspace.sharedWorkspace().openURL_(
+                NSURL.URLWithString_("https://code.claude.com/docs/en/setup"))
+        else:  # installed -> open Terminal and run `claude` (logs in via browser prompts)
+            import subprocess
+            try:
+                subprocess.run([
+                    "osascript",
+                    "-e", 'tell application "Terminal" to do script "claude"',
+                    "-e", 'tell application "Terminal" to activate',
+                ], timeout=8)
+                self._note.setStringValue_(self._t("cc_login_note"))
+            except Exception as exc:  # noqa: BLE001 - opening Terminal is best-effort
+                log.warning("could not open Terminal for claude login: %s", exc)
+
     @objc.python_method
     def _start_ollama_check(self):
         """Probe (in the background) whether Ollama is installed/running, its version
@@ -1648,9 +1699,9 @@ class SettingsWindow(NSObject):
         self._update_installed_models()
         if self._ollama_state == "running":
             self._refresh_ollama_model_popup()
-            for r in getattr(self, "_rules", []):  # rule rows on Ollama -> installed list
-                if self._backend_value(r["engine"]) == "ollama":
-                    self._refresh_rule_model_combo(r)
+            for r in getattr(self, "_rules", []):  # prompt rows on Ollama -> installed list
+                if self._prompt_row_backend(r) == "ollama":
+                    self._refresh_prompt_row(r)
 
     @objc.python_method
     def _refresh_ollama_model_popup(self):
@@ -1871,8 +1922,7 @@ class SettingsWindow(NSObject):
         that lands on values already in place doesn't needlessly arm Save."""
         if ident == "tab_llm":
             rules = tuple(
-                (self._rule_sector_key(r), self._backend_value(r["engine"]),
-                 str(r["model"].stringValue()))
+                (r["sector_key"], self._prompt_row_backend(r), str(r["model"].stringValue()))
                 for r in self._rules
             )
             return (self._selected_conn_type(), str(self._provider.titleOfSelectedItem()),
@@ -1911,10 +1961,7 @@ class SettingsWindow(NSObject):
         self._refresh_ollama_model_popup()
         self._ollama_url.setStringValue_(d.ollama_url)
         self._apply_conn_visibility()
-        for r in list(self._rules):  # drop every per-prompt rule
-            self._rules_stack.removeView_(r["row"])
-        self._rules = []
-        self._refresh_add_button()
+        self._rebuild_prompt_rows()  # every row back to the (just-reset) base = inherit
 
     def resetStt_(self, _sender):  # noqa: N802
         from ...core.config import STTConfig
@@ -1951,71 +1998,86 @@ class SettingsWindow(NSObject):
         default = detect_ui_lang()  # back to the system default
         self._uilang_popup.selectItemAtIndex_(0 if default == "ru" else 1)
 
-    # -- per-prompt model rules ----------------------------------------------
+    # -- per-prompt model: one collapsible row per prompt --------------------
 
     @objc.python_method
-    def _rule_sector_key(self, rule):
-        label = str(rule["prompt"].titleOfSelectedItem())
-        return next((s.key for s in self._sectors if s.label == label), None)
+    def _rebuild_prompt_rows(self, overrides=None):
+        """Rebuild the list — one collapsible row per sector. Each is pre-filled from
+        its saved override (if any) or the base LLM connection; a row left equal to the
+        base inherits it. Called from _build (base only) and _load (with overrides)."""
+        overrides = overrides or {}
+        for r in list(self._rules):
+            self._rules_stack.removeView_(r["row"])
+        self._rules = []
+        base_backend, base_model = self._current_backend(), self._current_model()
+        for s in self._sectors:
+            ov = overrides.get(s.key)
+            self._make_prompt_row(
+                s,
+                ov.get("backend", base_backend) if ov else base_backend,
+                ov.get("model", base_model) if ov else base_model,
+            )
 
     @objc.python_method
-    def _first_unassigned(self):
-        assigned = {self._rule_sector_key(r) for r in self._rules}
-        return next((s.key for s in self._sectors if s.key not in assigned), None)
+    def _make_prompt_row(self, sector, backend, model, expanded=False):
+        """One collapsible row per prompt: header (▸/▾ + prompt name + summary) over a
+        detail that mirrors the base LLM connection picker — Ollama / Claude Code CLI /
+        Прямой API radios (+ Anthropic/OpenAI provider for Direct API) + model combo.
+        Pre-filled from the sector's saved override or the base; a row left equal to the
+        base inherits it (nothing saved)."""
+        ctype = _conn_type_of(backend)
+        radios = []
+        radio_row = NSStackView.alloc().init()
+        radio_row.setOrientation_(NSUserInterfaceLayoutOrientationHorizontal)
+        radio_row.setAlignment_(NSLayoutAttributeCenterY)
+        radio_row.setSpacing_(10)
+        for tkey, lblkey in (("ollama", "conn_ollama"), ("cc", "conn_cc"), ("api", "conn_api")):
+            rb = NSButton.radioButtonWithTitle_target_action_(self._t(lblkey), self, "ruleConnChanged:")
+            rb.setState_(1 if tkey == ctype else 0)
+            radio_row.addArrangedSubview_(rb)
+            radios.append((rb, tkey))
 
-    @objc.python_method
-    def _refresh_add_button(self):
-        self._add_rule_btn.setEnabled_(self._first_unassigned() is not None)
-
-    @objc.python_method
-    def _make_rule_row(self, sector_key, backend, model, expanded=False):
-        """One rule as a collapsible panel: a summary header (disclosure ▸/▾ +
-        «промпт → движок · модель» + ✕) over a detail row with the full engine config
-        ([промпт ▾] [движок ▾] [модель ▾]) — mirroring the base block, collapsed by
-        default and re-openable to edit."""
-        prompt = NSPopUpButton.alloc().initWithFrame_pullsDown_(NSMakeRect(0, 0, 150, 26), False)
-        prompt.addItemsWithTitles_([s.label for s in self._sectors])
-        prompt.widthAnchor().constraintEqualToConstant_(150).setActive_(True)
-        prompt.setTarget_(self)
-        prompt.setAction_("markDirty:")
-        lbl = next((s.label for s in self._sectors if s.key == sector_key), None)
-        if lbl:
-            prompt.selectItemWithTitle_(lbl)
-        engine = NSPopUpButton.alloc().initWithFrame_pullsDown_(NSMakeRect(0, 0, 180, 26), False)
-        engine.addItemsWithTitles_(self._backend_labels())
-        engine.widthAnchor().constraintEqualToConstant_(180).setActive_(True)
-        engine.setTarget_(self)
-        engine.setAction_("ruleEngineChanged:")  # repopulate the model dropdown + mark dirty
-        self._select_backend(engine, backend)
-        self._set_rule_engine_availability(engine)  # grey out engines without a key
-        # editable combo: dropdown lists the engine's models (installed ones for
-        # Ollama), but you can still type a custom name.
-        model_combo = NSComboBox.alloc().initWithFrame_(NSMakeRect(0, 0, 170, 26))
-        model_combo.widthAnchor().constraintEqualToConstant_(170).setActive_(True)
+        # provider matters only for «Прямой API» (anthropic vs openai); hidden otherwise
+        provider = NSPopUpButton.alloc().initWithFrame_pullsDown_(NSMakeRect(0, 0, 120, 26), False)
+        provider.addItemsWithTitles_(["Anthropic", "OpenAI"])
+        provider.selectItemWithTitle_("OpenAI" if backend == "openai" else "Anthropic")
+        provider.setTarget_(self)
+        provider.setAction_("ruleProviderChanged:")
+        provider.widthAnchor().constraintEqualToConstant_(120).setActive_(True)
+        # editable combo: lists the backend's models (installed ones for Ollama), or type
+        model_combo = NSComboBox.alloc().initWithFrame_(NSMakeRect(0, 0, 200, 26))
+        model_combo.widthAnchor().constraintEqualToConstant_(200).setActive_(True)
         model_combo.setCompletes_(True)
-        model_combo.addItemsWithObjectValues_(self._rule_models_for(backend))
         model_combo.setStringValue_(str(model or ""))
         model_combo.setDelegate_(self)
+        model_line = NSStackView.alloc().init()
+        model_line.setOrientation_(NSUserInterfaceLayoutOrientationHorizontal)
+        model_line.setAlignment_(NSLayoutAttributeCenterY)
+        model_line.setSpacing_(6)
+        model_line.addArrangedSubview_(provider)
+        model_line.addArrangedSubview_(model_combo)
 
         detail = NSStackView.alloc().init()
-        detail.setOrientation_(NSUserInterfaceLayoutOrientationHorizontal)
-        detail.setAlignment_(NSLayoutAttributeCenterY)
+        detail.setOrientation_(NSUserInterfaceLayoutOrientationVertical)
+        detail.setAlignment_(NSLayoutAttributeLeading)
         detail.setSpacing_(6)
-        for c in (prompt, engine, model_combo):
-            detail.addArrangedSubview_(c)
+        detail.addArrangedSubview_(radio_row)
+        detail.addArrangedSubview_(model_line)
 
         disclosure = NSButton.buttonWithTitle_target_action_("▸", self, "ruleToggle:")
         disclosure.setBordered_(False)
         disclosure.widthAnchor().constraintEqualToConstant_(22).setActive_(True)
+        name = NSTextField.labelWithString_(sector.label)
+        name.setFont_(NSFont.boldSystemFontOfSize_(12))
+        name.widthAnchor().constraintEqualToConstant_(140).setActive_(True)
         summary = NSTextField.labelWithString_("")
-        summary.setFont_(NSFont.systemFontOfSize_(12))
-        delete = NSButton.buttonWithTitle_target_action_("✕", self, "deleteRule:")
-        delete.widthAnchor().constraintEqualToConstant_(32).setActive_(True)
+        summary.setFont_(NSFont.systemFontOfSize_(11))
+        summary.setTextColor_(NSColor.secondaryLabelColor())
         header = NSStackView.alloc().init()
         header.setOrientation_(NSUserInterfaceLayoutOrientationHorizontal)
         header.setAlignment_(NSLayoutAttributeCenterY)
         header.setSpacing_(6)
-        for c in (disclosure, summary, delete):
+        for c in (disclosure, name, summary):
             header.addArrangedSubview_(c)
 
         container = NSStackView.alloc().init()
@@ -2025,11 +2087,37 @@ class SettingsWindow(NSObject):
         container.addArrangedSubview_(header)
         container.addArrangedSubview_(detail)
 
-        rule = {"row": container, "prompt": prompt, "engine": engine, "model": model_combo,
-                "delete": delete, "detail": detail, "disclosure": disclosure, "summary": summary}
+        rule = {"sector_key": sector.key, "row": container, "radios": radios,
+                "provider": provider, "model": model_combo, "detail": detail,
+                "disclosure": disclosure, "summary": summary}
         self._rules.append(rule)
         self._rules_stack.addArrangedSubview_(container)
         self._set_rule_expanded(rule, expanded)
+        self._refresh_prompt_row(rule)
+
+    @objc.python_method
+    def _rule_conn_type(self, rule):
+        return next((tkey for rb, tkey in rule["radios"] if rb.state()), "ollama")
+
+    @objc.python_method
+    def _prompt_row_backend(self, rule):
+        t = self._rule_conn_type(rule)
+        if t == "ollama":
+            return "ollama"
+        if t == "cc":
+            return "claude_warm"
+        return "openai" if str(rule["provider"].titleOfSelectedItem()) == "OpenAI" else "anthropic"
+
+    @objc.python_method
+    def _refresh_prompt_row(self, rule):
+        """Provider picker shows only for «Прямой API»; the model combo's suggestions
+        follow the chosen backend; the summary reflects inherit-vs-override."""
+        rule["provider"].setHidden_(self._rule_conn_type(rule) != "api")
+        cb = rule["model"]
+        cur = str(cb.stringValue())
+        cb.removeAllItems()
+        cb.addItemsWithObjectValues_(self._rule_models_for(self._prompt_row_backend(rule)))
+        cb.setStringValue_(cur)
         self._update_rule_summary(rule)
 
     @objc.python_method
@@ -2039,10 +2127,15 @@ class SettingsWindow(NSObject):
 
     @objc.python_method
     def _update_rule_summary(self, rule):
-        p = str(rule["prompt"].titleOfSelectedItem() or "")
-        eng = str(rule["engine"].titleOfSelectedItem() or "")
-        m = str(rule["model"].stringValue()).strip() or "—"
-        rule["summary"].setStringValue_(f"{p} → {eng} · {m}")
+        backend = self._prompt_row_backend(rule)
+        model = str(rule["model"].stringValue()).strip()
+        base = (self._current_backend(), self._current_model().strip())
+        if not model or (backend, model) == base:
+            rule["summary"].setStringValue_(f"· {self._t('prompt_inherits_base')}")
+        else:
+            label = self._t({"ollama": "conn_ollama", "cc": "conn_cc",
+                             "api": "conn_api"}[self._rule_conn_type(rule)])
+            rule["summary"].setStringValue_(f"→ {label} · {model}")
 
     @objc.python_method
     def _refresh_rule_summaries(self):
@@ -2064,37 +2157,19 @@ class SettingsWindow(NSObject):
         return {"anthropic": ANTHROPIC_MODELS, "openai": OPENAI_MODELS,
                 "claude_warm": CC_MODELS, "claude_cli": CC_MODELS}.get(backend, [])
 
-    @objc.python_method
-    def _refresh_rule_model_combo(self, rule):
-        cb = rule["model"]
-        cur = str(cb.stringValue())
-        cb.removeAllItems()
-        cb.addItemsWithObjectValues_(self._rule_models_for(self._backend_value(rule["engine"])))
-        cb.setStringValue_(cur)
-
-    def ruleEngineChanged_(self, sender):  # noqa: N802
-        rule = next((r for r in self._rules if r["engine"] == sender), None)
+    def ruleConnChanged_(self, sender):  # noqa: N802
+        rule = next((r for r in self._rules if any(rb == sender for rb, _ in r["radios"])), None)
         if rule is not None:
-            self._refresh_rule_model_combo(rule)
+            for rb, _ in rule["radios"]:
+                rb.setState_(1 if rb == sender else 0)
+            self._refresh_prompt_row(rule)
         self.markDirty_(sender)
 
-    def addRule_(self, _sender):  # noqa: N802
-        key = self._first_unassigned()
-        if key is None:
-            return
-        # default a new rule to the base connection's backend + model
-        self._make_rule_row(key, self._current_backend(), self._current_model(), expanded=True)
-        self._refresh_add_button()
-        self._recompute_dirty()
-
-    def deleteRule_(self, sender):  # noqa: N802
-        rule = next((r for r in self._rules if r["delete"] == sender), None)
-        if rule is None:
-            return
-        self._rules_stack.removeView_(rule["row"])
-        self._rules.remove(rule)
-        self._refresh_add_button()
-        self._recompute_dirty()
+    def ruleProviderChanged_(self, sender):  # noqa: N802
+        rule = next((r for r in self._rules if r["provider"] == sender), None)
+        if rule is not None:
+            self._refresh_prompt_row(rule)
+        self.markDirty_(sender)
 
     @objc.python_method
     def _refresh_trigger_states(self):
