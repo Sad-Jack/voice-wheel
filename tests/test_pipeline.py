@@ -89,3 +89,33 @@ def test_context_includes_clipboard_and_truncates():
     assert "ГОЛОС:\nответь дружелюбно" in user
     assert "БУФЕР:\n" in user
     assert user.index("ГОЛОС:") < user.index("БУФЕР:")
+
+
+def test_transform_empty_transcript_skips_llm():
+    # a silent press (STT heard nothing) must NOT hit the LLM (B3) — there is
+    # nothing to transform, and a weak model could hallucinate a reply
+    llm = FakeLLM(available=True)
+    pipe = Pipeline(FakeSTT("   "), llm, FakeClipboard(), make_config())
+    result = pipe.run(AUDIO, "transform", "normalize")
+    assert result.result == ""
+    assert llm.calls == []
+
+
+def test_context_empty_speech_and_clipboard_skips_llm():
+    llm = FakeLLM(available=True)
+    pipe = Pipeline(FakeSTT(""), llm, FakeClipboard(text=""), make_config())
+    result = pipe.run(AUDIO, "context", "friendly")
+    assert result.result == ""
+    assert llm.calls == []  # nothing to send at all
+
+
+def test_context_buffer_only_still_calls_llm():
+    # empty speech but a non-empty clipboard is the valid "buffer-only" mode —
+    # the short-circuit must NOT swallow it
+    llm = FakeLLM(available=True)
+    pipe = Pipeline(FakeSTT(""), llm, FakeClipboard(text="чужой пост"), make_config())
+    result = pipe.run(AUDIO, "context", "friendly")
+    assert len(llm.calls) == 1
+    _system, user = llm.calls[0]
+    assert user == "БУФЕР:\nчужой пост"  # no ГОЛОС section, buffer present
+    assert result.result == "LLM<<БУФЕР:\nчужой пост>>"

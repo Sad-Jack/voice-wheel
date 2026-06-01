@@ -98,8 +98,19 @@ class Pipeline:
                 context = context[:limit]
                 truncated = True
 
-        system = build_system_prompt(ring_e, sector)
         user = build_user_message(transcript, context)
+        if not user:
+            # Nothing to process: a silent press (empty transcript) with no usable
+            # clipboard. Skip the LLM round-trip entirely — it would only be asked to
+            # turn nothing into nothing (and a weak model might hallucinate a reply).
+            # Buffer-only mode still works: empty speech + non-empty БУФЕР keeps `user`.
+            return PipelineResult(
+                ring=ring_e.value, sector=sector, transcript=transcript, result="",
+                used_context=ring_e is Ring.CONTEXT, context=context,
+                context_truncated=truncated,
+            )
+
+        system = build_system_prompt(ring_e, sector)
         try:
             result = self._llm.complete(system, user, sector)
         except Exception as exc:  # noqa: BLE001 - keep the dictation, don't lose it
