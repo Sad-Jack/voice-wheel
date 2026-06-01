@@ -46,7 +46,6 @@ from AppKit import (
     NSLayoutAttributeCenterY,
     NSLayoutAttributeLeading,
     NSLayoutConstraint,
-    NSLineBreakByTruncatingTail,
     NSLineBreakByWordWrapping,
     NSPopUpButton,
     NSScrollView,
@@ -623,10 +622,14 @@ class SettingsWindow(NSObject):
         root.addSubview_(reset_btn)
 
         self._note = NSTextField.labelWithString_("")
-        self._note.setFrame_(NSMakeRect(120, 15, W - 260, 18))
+        # Sits between Reset (left) and Save (right); wraps to 2 lines so longer
+        # status messages (downloading, errors, refresh notes) aren't truncated.
+        self._note.setFrame_(NSMakeRect(116, 8, W - 250, 32))
         self._note.setFont_(NSFont.systemFontOfSize_(11))
         self._note.setTextColor_(NSColor.secondaryLabelColor())
-        self._note.setLineBreakMode_(NSLineBreakByTruncatingTail)  # «…» instead of clipping
+        self._note.setUsesSingleLineMode_(False)
+        self._note.setLineBreakMode_(NSLineBreakByWordWrapping)
+        self._note.setMaximumNumberOfLines_(2)
         root.addSubview_(self._note)
 
         self._save_btn = NSButton.buttonWithTitle_target_action_(T("save"), self, "save:")
