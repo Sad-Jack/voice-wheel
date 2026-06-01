@@ -24,7 +24,8 @@ import time
 from collections import deque
 from pathlib import Path
 
-_MAX = 300  # events kept in memory / shown in the tab
+_MAX = 1000              # events kept in memory / shown in the tab (scroll back this far)
+_MAX_BYTES = 5 * 1024 * 1024  # hard ceiling on the JSONL file (~5 MB) — see _compact
 
 
 def classify_error(message: str) -> str:
@@ -49,9 +50,15 @@ def classify_error(message: str) -> str:
 
 
 class EventLog:
-    def __init__(self, path: Path | None = None, maxlen: int = _MAX) -> None:
+    def __init__(
+        self,
+        path: Path | None = None,
+        maxlen: int = _MAX,
+        max_bytes: int = _MAX_BYTES,
+    ) -> None:
         self._path = Path(path) if path else None
         self._buf: deque = deque(maxlen=maxlen)
+        self._max_bytes = max_bytes
         self._lock = threading.Lock()
         if self._path is not None:
             self._load_tail()
@@ -78,9 +85,25 @@ class EventLog:
             try:
                 with self._path.open("a", encoding="utf-8") as f:
                     f.write(json.dumps(event, ensure_ascii=False) + "\n")
+                if self._max_bytes and self._path.stat().st_size > self._max_bytes:
+                    self._compact()
             except OSError:
                 pass
         return event
+
+    def _compact(self) -> None:
+        """Keep the file bounded: rewrite it with only the most recent events (the
+        in-memory tail), so a long-running app never lets the log grow past the cap.
+        Atomic via a temp file so a crash mid-write can't corrupt the log."""
+        with self._lock:
+            items = list(self._buf)
+        body = "".join(json.dumps(e, ensure_ascii=False) + "\n" for e in items)
+        try:
+            tmp = self._path.with_name(self._path.name + ".tmp")
+            tmp.write_text(body, encoding="utf-8")
+            tmp.replace(self._path)
+        except OSError:
+            pass
 
     def recent(self, n: int | None = None) -> list:
         """Newest first."""

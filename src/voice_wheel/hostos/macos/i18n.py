@@ -239,9 +239,9 @@ STR = {
     "logs_header": ("🗒 Логи", "🗒 Logs"),
     "logs_hint": (
         "Что приложение делало в последнее время: диктовки, обработки, озвучка и "
-        "ошибки. Свежие — сверху. Обновляется само.",
+        "ошибки. Свежие — снизу, прокрути вверх для истории. Обновляется само.",
         "What the app did recently: dictations, transforms, speech and errors. "
-        "Newest on top. Refreshes itself.",
+        "Newest at the bottom — scroll up for history. Refreshes itself.",
     ),
     "logs_clear": ("Очистить", "Clear"),
     "logs_empty": (

@@ -330,12 +330,30 @@ class SettingsWindow(NSObject):
         tv = getattr(self, "_logs_view", None)
         if tv is None:
             return
-        events = event_log.EVENTS.recent(300)
+        # chronological (oldest → newest) so the latest sits at the BOTTOM, like a
+        # terminal: scroll up for history, the freshest line is always last
+        events = list(reversed(event_log.EVENTS.recent()))
         if events:
             text = "\n".join(self._format_log_line(ev) for ev in events)
         else:
             text = _tr("logs_empty", self._uilang)
+        pinned = self._logs_pinned_to_bottom()  # don't yank the user if they scrolled up
         tv.setString_(text)
+        if pinned:
+            tv.scrollToEndOfDocument_(None)  # keep the newest line in view
+
+    @objc.python_method
+    def _logs_pinned_to_bottom(self):
+        """True if the feed is scrolled to (near) the bottom — i.e. the user is
+        watching the latest, so a refresh should keep them pinned there. If they've
+        scrolled up to read history, leave their position alone."""
+        tv = getattr(self, "_logs_view", None)
+        sv = tv.enclosingScrollView() if tv is not None else None
+        if sv is None:
+            return True
+        visible = sv.documentVisibleRect()
+        doc_h = tv.frame().size.height
+        return (visible.origin.y + visible.size.height) >= (doc_h - 24)
 
     @objc.python_method
     def _format_log_line(self, ev):
@@ -551,7 +569,8 @@ class SettingsWindow(NSObject):
         self._api_no_key_btn = button("keys_redirect_btn", "openKeysTab:", 360)
         self._api_no_key_btn.setHidden_(True)
         stack[0].addArrangedSubview_(self._api_no_key_btn)
-        hint("keys_pointer")
+        # (no «ключи на вкладке Ключи» hint here — the redirect button already says it,
+        #  and when a key is present the provider/model rows speak for themselves)
         stack[0] = prev
 
         # -- Ollama group: pick the model + URL. Downloading, installed list and
