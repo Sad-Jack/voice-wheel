@@ -213,7 +213,7 @@ TTS_VOICES = [
 WHEEL_KB_DEFAULT = "cmd+ctrl+z"  # ⌃⌘Z — запись/колесо
 TTS_KB_DEFAULT = "cmd+ctrl+x"    # ⌃⌘X — озвучка
 
-W = 520
+W = 580  # widened from 520 to fit 7 tabs + the per-prompt rule rows comfortably
 H = 464  # +24 over the original 440 for the top restart banner (the old bottom
          # banner gap was reclaimed, so the window grew less than the banner's height)
 
@@ -475,36 +475,6 @@ class SettingsWindow(NSObject):
         hint("cc_hint")
         stack[0] = prev
 
-        # ---- prompts = wheel sectors: a live list + folder access. Read FRESH from
-        #      the folder (not the cached sectors()) so a just-added prompt shows here
-        #      without an app restart; the wheel itself still needs a restart — see hint.
-        self._sectors = list(load_sectors())
-        header("prompts_header")
-        self._prompts_label = label("", gray=True)
-        self._prompts_label.setUsesSingleLineMode_(False)
-        self._prompts_label.setLineBreakMode_(NSLineBreakByWordWrapping)
-        self._prompts_label.setMaximumNumberOfLines_(0)
-        self._prompts_label.setPreferredMaxLayoutWidth_(W - 68)
-        stack[0].addArrangedSubview_(self._prompts_label)
-        prompt_btns = NSStackView.alloc().init()
-        prompt_btns.setOrientation_(NSUserInterfaceLayoutOrientationHorizontal)
-        prompt_btns.setSpacing_(8)
-        prompt_btns.addArrangedSubview_(button("open_prompts_folder", "openPromptsFolder:", 230))
-        prompt_btns.addArrangedSubview_(button("refresh_prompts", "refreshPrompts:", 110))
-        stack[0].addArrangedSubview_(prompt_btns)
-        hint("prompts_hint")
-        self._refresh_prompts_label()
-
-        header("rules_header")
-        hint("rules_hint")
-        self._rules_stack = NSStackView.alloc().init()
-        self._rules_stack.setOrientation_(NSUserInterfaceLayoutOrientationVertical)
-        self._rules_stack.setAlignment_(NSLayoutAttributeLeading)
-        self._rules_stack.setSpacing_(6)
-        stack[0].addArrangedSubview_(self._rules_stack)
-        self._add_rule_btn = button("add_rule", "addRule:", 180)
-        stack[0].addArrangedSubview_(self._add_rule_btn)
-
         # ---- Models tab: one place to download & manage local Ollama models
         #      (live status + restart, installed list, pull). The LLM tab just picks.
         add_tab("tab_models", scroll=True)
@@ -540,6 +510,32 @@ class SettingsWindow(NSObject):
         stack[0].addArrangedSubview_(dl_row)
         hint("models_download_hint")
         stack[0].addArrangedSubview_(button("ollama_library_btn", "openOllamaLibrary:", 250))
+
+        # ---- Prompts tab: the wheel's sectors (count + folder access) and the
+        #      optional per-prompt model rules. Read FRESH from the folder so a
+        #      just-added prompt shows here without a restart (wheel applies on restart).
+        add_tab("tab_prompts", scroll=True)
+        self._sectors = list(load_sectors())
+        header("prompts_header")
+        self._prompts_label = label("", gray=True)
+        stack[0].addArrangedSubview_(self._prompts_label)
+        prompt_btns = NSStackView.alloc().init()
+        prompt_btns.setOrientation_(NSUserInterfaceLayoutOrientationHorizontal)
+        prompt_btns.setSpacing_(8)
+        prompt_btns.addArrangedSubview_(button("open_prompts_folder", "openPromptsFolder:", 230))
+        prompt_btns.addArrangedSubview_(button("refresh_prompts", "refreshPrompts:", 110))
+        stack[0].addArrangedSubview_(prompt_btns)
+        hint("prompts_hint")
+        self._refresh_prompts_label()
+        header("rules_header")
+        hint("rules_hint")
+        self._rules_stack = NSStackView.alloc().init()
+        self._rules_stack.setOrientation_(NSUserInterfaceLayoutOrientationVertical)
+        self._rules_stack.setAlignment_(NSLayoutAttributeLeading)
+        self._rules_stack.setSpacing_(6)
+        stack[0].addArrangedSubview_(self._rules_stack)
+        self._add_rule_btn = button("add_rule", "addRule:", 180)
+        stack[0].addArrangedSubview_(self._add_rule_btn)
 
         # ---- Speech (STT) tab ----
         add_tab("tab_stt")
@@ -674,10 +670,7 @@ class SettingsWindow(NSObject):
 
     @objc.python_method
     def _refresh_prompts_label(self):
-        labels = [s.label for s in self._sectors]
-        prefix = self._t("prompts_list_prefix")
-        body = " · ".join(labels) if labels else "—"
-        self._prompts_label.setStringValue_(f"{prefix} ({len(labels)}): {body}")
+        self._prompts_label.setStringValue_(self._t("prompts_count").format(len(self._sectors)))
 
     def openPromptsFolder_(self, _sender):  # noqa: N802
         from AppKit import NSWorkspace
@@ -1257,6 +1250,9 @@ class SettingsWindow(NSObject):
         self._update_installed_label()
         if self._ollama_state == "running":
             self._refresh_ollama_model_combo()
+            for r in getattr(self, "_rules", []):  # rule rows on Ollama -> installed list
+                if self._backend_value(r["engine"]) == "ollama":
+                    self._refresh_rule_model_combo(r)
 
     @objc.python_method
     def _refresh_ollama_model_combo(self):
@@ -1506,20 +1502,48 @@ class SettingsWindow(NSObject):
         engine.addItemsWithTitles_(self._backend_labels())
         engine.widthAnchor().constraintEqualToConstant_(150).setActive_(True)
         engine.setTarget_(self)
-        engine.setAction_("markDirty:")
+        engine.setAction_("ruleEngineChanged:")  # repopulate the model dropdown + mark dirty
         self._select_backend(engine, backend)
-        model_field = NSTextField.alloc().initWithFrame_(NSMakeRect(0, 0, 110, 22))
-        model_field.widthAnchor().constraintEqualToConstant_(110).setActive_(True)
-        model_field.setStringValue_(str(model or ""))
-        model_field.setDelegate_(self)
+        # editable combo: dropdown lists the engine's models (installed ones for
+        # Ollama), but you can still type a custom name.
+        model_combo = NSComboBox.alloc().initWithFrame_(NSMakeRect(0, 0, 150, 26))
+        model_combo.widthAnchor().constraintEqualToConstant_(150).setActive_(True)
+        model_combo.setCompletes_(True)
+        model_combo.addItemsWithObjectValues_(self._rule_models_for(backend))
+        model_combo.setStringValue_(str(model or ""))
+        model_combo.setDelegate_(self)
         delete = NSButton.buttonWithTitle_target_action_("✕", self, "deleteRule:")
         delete.widthAnchor().constraintEqualToConstant_(32).setActive_(True)
-        for c in (prompt, engine, model_field, delete):
+        for c in (prompt, engine, model_combo, delete):
             h.addArrangedSubview_(c)
         self._rules.append(
-            {"row": h, "prompt": prompt, "engine": engine, "model": model_field, "delete": delete}
+            {"row": h, "prompt": prompt, "engine": engine, "model": model_combo, "delete": delete}
         )
         self._rules_stack.addArrangedSubview_(h)
+
+    @objc.python_method
+    def _rule_models_for(self, backend):
+        """The model suggestions for a rule's chosen engine — installed Ollama models
+        (or the curated defaults if none are known yet), else the per-provider lists."""
+        if backend == "ollama":
+            installed = [name for name, _ in getattr(self, "_ollama_models", [])]
+            return installed or OLLAMA_MODELS
+        return {"anthropic": ANTHROPIC_MODELS, "openai": OPENAI_MODELS,
+                "claude_warm": CC_MODELS, "claude_cli": CC_MODELS}.get(backend, [])
+
+    @objc.python_method
+    def _refresh_rule_model_combo(self, rule):
+        cb = rule["model"]
+        cur = str(cb.stringValue())
+        cb.removeAllItems()
+        cb.addItemsWithObjectValues_(self._rule_models_for(self._backend_value(rule["engine"])))
+        cb.setStringValue_(cur)
+
+    def ruleEngineChanged_(self, sender):  # noqa: N802
+        rule = next((r for r in self._rules if r["engine"] == sender), None)
+        if rule is not None:
+            self._refresh_rule_model_combo(rule)
+        self.markDirty_(sender)
 
     def addRule_(self, _sender):  # noqa: N802
         key = self._first_unassigned()

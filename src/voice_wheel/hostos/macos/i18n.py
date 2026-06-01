@@ -19,6 +19,7 @@ STR = {
     "tab_voice": ("Голос", "Voice"),
     "tab_triggers": ("Триггеры", "Triggers"),
     "tab_lang": ("Язык", "Language"),
+    "tab_prompts": ("Промпты", "Prompts"),
     # LLM tab
     "llm_header": ("🧠 Обработка речи (LLM)", "🧠 Speech processing (LLM)"),
     "engine": ("Движок", "Engine"),
@@ -104,7 +105,7 @@ STR = {
         "Install Claude Code and run claude login.",
     ),
     "prompts_header": ("🧩 Промпты — секторы колеса", "🧩 Prompts — wheel sectors"),
-    "prompts_list_prefix": ("Сейчас", "Now"),
+    "prompts_count": ("Сейчас промптов: {}", "Prompts now: {}"),
     "prompts_hint": (
         "Каждый файл «N-Название.md» в папке промптов = один сектор колеса (N задаёт "
         "порядок). Добавь / переименуй / удали файл, затем перезапусти приложение, "
