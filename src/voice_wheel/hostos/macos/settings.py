@@ -55,6 +55,7 @@ from AppKit import (
     NSTabView,
     NSTabViewItem,
     NSTextField,
+    NSTextView,
     NSUserInterfaceLayoutOrientationHorizontal,
     NSUserInterfaceLayoutOrientationVertical,
     NSView,
@@ -62,8 +63,9 @@ from AppKit import (
     NSWindowStyleMaskClosable,
     NSWindowStyleMaskTitled,
 )
-from Foundation import NSMakeRect, NSObject
+from Foundation import NSMakeRect, NSObject, NSTimer
 
+from ...core import event_log
 from ...core.config import (
     STTConfig,
     TTSConfig,
@@ -214,9 +216,16 @@ TTS_VOICES = [
 WHEEL_KB_DEFAULT = "cmd+ctrl+z"  # ⌃⌘Z — запись/колесо
 TTS_KB_DEFAULT = "cmd+ctrl+x"    # ⌃⌘X — озвучка
 
-W = 640  # widened to fit 8 tabs (incl. «Ключи») + the per-prompt rule rows
-H = 464  # +24 over the original 440 for the top restart banner (the old bottom
-         # banner gap was reclaimed, so the window grew less than the banner's height)
+W = 680  # widened to fit 9 tabs (incl. «Ключи» + «Логи») + the per-prompt rule rows
+H = 520  # taller so the «Логи» viewer has room; everything else is positioned off H
+
+# Which stored key a failing backend implicates (#14 «не работает» badge). Backends
+# without a key (claude_warm subscription, claude_cli, keyless local ollama) map to none.
+_BACKEND_TO_KEY = {
+    "anthropic": "ANTHROPIC_API_KEY",
+    "openai": "OPENAI_API_KEY",
+    "ollama": "OLLAMA_API_KEY",
+}
 
 
 class SettingsWindow(NSObject):
@@ -238,6 +247,10 @@ class SettingsWindow(NSObject):
             self._last_provider = "Anthropic"   # for per-provider model memory (#F2)
             self._model_by_provider = {}
             self._pull_result = None      # (ok, model) handoff from the ollama-pull thread
+            self._key_rows = []           # «Ключи» rows: dicts of {env, secure, plain, eye, status}
+            self._key_checked_at = {}     # env -> when the user last edited it (clears stale #14 marks)
+            self._logs_view = None        # «Логи» feed (NSTextView)
+            self._logs_timer = None       # auto-refresh timer, live only while the tab is shown
         return self
 
     @objc.python_method
@@ -272,15 +285,93 @@ class SettingsWindow(NSObject):
         self._window.makeKeyAndOrderFront_(None)
         self.performSelector_withObject_afterDelay_("clearFocus:", None, 0.0)
 
-    def tabView_didSelectTabViewItem_(self, _tab_view, _item):  # noqa: N802
+    def tabView_didSelectTabViewItem_(self, _tab_view, item):  # noqa: N802
         # NSTabView auto-focuses the new tab's first text field; drop it so the caret
         # doesn't land in an input (e.g. «Скачать модель») just from switching tabs.
         self.performSelector_withObject_afterDelay_("clearFocus:", None, 0.0)
         self._mask_all_keys()  # revealed keys are only shown while ON the Keys tab
+        ident = item.identifier() if item is not None else None
+        if ident == "tab_keys":
+            self._refresh_key_status()  # surface «не работает» when the user looks (#14)
+        # The «Логи» feed only ticks while it's the visible tab (no wasted work).
+        on_logs = ident == "tab_logs"
+        self._set_logs_timer(on_logs)
+        if on_logs:
+            self._render_logs()
 
     def clearFocus_(self, _arg):  # noqa: N802
         if self._window is not None:
             self._window.makeFirstResponder_(self._window)
+
+    # -- «Логи» tab -----------------------------------------------------------
+
+    @objc.python_method
+    def _set_logs_timer(self, on):
+        timer = getattr(self, "_logs_timer", None)
+        if on and timer is None:
+            self._logs_timer = (
+                NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
+                    1.5, self, "refreshLogs:", None, True
+                )
+            )
+        elif not on and timer is not None:
+            timer.invalidate()
+            self._logs_timer = None
+
+    def refreshLogs_(self, _timer):  # noqa: N802
+        self._render_logs()
+
+    def clearLogs_(self, _sender):  # noqa: N802
+        event_log.EVENTS.clear()
+        self._render_logs()
+
+    @objc.python_method
+    def _render_logs(self):
+        tv = getattr(self, "_logs_view", None)
+        if tv is None:
+            return
+        events = event_log.EVENTS.recent(300)
+        if events:
+            text = "\n".join(self._format_log_line(ev) for ev in events)
+        else:
+            text = _tr("logs_empty", self._uilang)
+        tv.setString_(text)
+
+    @objc.python_method
+    def _format_log_line(self, ev):
+        """One human line for an event dict (see core.event_log). Newest-first order
+        and timestamps are added by the caller / store; this is pure presentation."""
+        import time as _time
+
+        def T(key):
+            return _tr(key, self._uilang)
+
+        def short(s, n=160):
+            s = (s or "").replace("\n", " ").strip()
+            return s if len(s) <= n else s[:n] + "…"
+
+        t = ev.get("t")
+        ts = _time.strftime("%H:%M:%S", _time.localtime(t)) if t else "--:--:--"
+        kind = ev.get("kind", "")
+        if kind == "dictate":
+            body = f'🎤 {T("log_dictation")} → «{short(ev.get("result") or ev.get("transcript"))}»'
+        elif kind == "transform":
+            sector = ev.get("sector") or "?"
+            body = f'🎤 {T("log_recorded")} → 🧠 {sector} → «{short(ev.get("result"))}»'
+        elif kind == "context":
+            sector = ev.get("sector") or "?"
+            body = (f'📋 {T("log_buffer")} · 🎤 {T("log_recorded")} → 🧠 {sector} '
+                    f'→ «{short(ev.get("result"))}»')
+        elif kind == "tts":
+            body = f'🔊 {T("log_spoken")}: «{short(ev.get("text"))}»'
+        elif kind == "crash":
+            body = f'💥 {T("log_crash")}: {short(ev.get("message"), 200)}'
+        else:  # error
+            cat = ev.get("cat") or "other"
+            known = {"auth", "rate_limit", "unreachable", "model", "stt", "other"}
+            human = T(f"err_{cat}" if cat in known else "err_other")
+            body = f'⚠️ {T("log_error")}: {human} — {short(ev.get("message"), 160)}'
+        return f"{ts}  {body}"
 
     # -- build ----------------------------------------------------------------
 
@@ -577,8 +668,14 @@ class SettingsWindow(NSObject):
             eye.setTarget_(self)
             eye.setAction_("toggleKeyRow:")
             eye.widthAnchor().constraintEqualToConstant_(28).setActive_(True)
-            self._key_rows.append({"env": env_var, "secure": secure, "plain": plain, "eye": eye})
-            row(label_key, secure, plain, eye)
+            # red «не работает» badge — hidden until a request fails auth (#14)
+            status = label("", gray=False)
+            status.setTextColor_(NSColor.systemRedColor())
+            status.setHidden_(True)
+            self._key_rows.append({
+                "env": env_var, "secure": secure, "plain": plain, "eye": eye, "status": status,
+            })
+            row(label_key, secure, plain, eye).addArrangedSubview_(status)
 
         key_row("key_anthropic", "ANTHROPIC_API_KEY")
         key_row("key_openai", "OPENAI_API_KEY")
@@ -645,6 +742,38 @@ class SettingsWindow(NSObject):
         stack[0].addArrangedSubview_(self._uilang_popup)
         hint("lang_hint")
 
+        # ---- Logs tab (read-only event feed; newest first, auto-refreshing) ----
+        add_tab("tab_logs")
+        header("logs_header")
+        hint("logs_hint")
+        clear_btn = NSButton.buttonWithTitle_target_action_(
+            T("logs_clear"), self, "clearLogs:"
+        )
+        clear_btn.setControlSize_(1)  # small
+        stack[0].addArrangedSubview_(clear_btn)
+        log_w, log_h = W - 64, H - 250
+        logs_scroll = NSScrollView.alloc().initWithFrame_(NSMakeRect(0, 0, log_w, log_h))
+        logs_scroll.setHasVerticalScroller_(True)
+        logs_scroll.setHasHorizontalScroller_(False)
+        logs_scroll.setAutohidesScrollers_(True)
+        logs_scroll.setBorderType_(2)  # NSBezelBorder — a framed box around the feed
+        logs_scroll.setDrawsBackground_(False)
+        logs_scroll.setTranslatesAutoresizingMaskIntoConstraints_(False)
+        tv = NSTextView.alloc().initWithFrame_(NSMakeRect(0, 0, log_w, log_h))
+        tv.setEditable_(False)
+        tv.setSelectable_(True)            # so the user can copy a line out
+        tv.setRichText_(False)
+        tv.setDrawsBackground_(False)
+        tv.setFont_(NSFont.monospacedSystemFontOfSize_weight_(11, 0))
+        tv.setTextColor_(NSColor.labelColor())
+        logs_scroll.setDocumentView_(tv)
+        logs_scroll.widthAnchor().constraintEqualToConstant_(log_w).setActive_(True)
+        logs_scroll.heightAnchor().constraintEqualToConstant_(log_h).setActive_(True)
+        stack[0].addArrangedSubview_(logs_scroll)
+        self._logs_view = tv
+        self._logs_timer = None
+        self._render_logs()
+
         # ---- always-visible restart banner, pinned to the TOP above the tabs so the
         #      user always knows which settings cost a restart. Fully static (same text
         #      and weight always) and wraps to 2 lines, so it never shifts or truncates.
@@ -686,6 +815,7 @@ class SettingsWindow(NSObject):
         self._wire_dirty()
         self._set_tooltips()
         self._capture_baseline()
+        self._refresh_key_status()  # reflect any auth failures carried over in the log
 
     @objc.python_method
     def _set_tooltips(self):
@@ -803,9 +933,18 @@ class SettingsWindow(NSObject):
     def controlTextDidChange_(self, _notif):  # noqa: N802
         # editing a key on the «Ключи» tab changes what's available to pick
         obj = _notif.object()
-        if any(obj in (e["secure"], e["plain"]) for e in getattr(self, "_key_rows", [])):
+        edited = next(
+            (e for e in getattr(self, "_key_rows", []) if obj in (e["secure"], e["plain"])),
+            None,
+        )
+        if edited is not None:
+            # the user is fixing this key — drop any «не работает» mark until the
+            # NEXT failed request (a stale auth error must not stick to a new key)
+            import time as _time
+            self._key_checked_at[edited["env"]] = _time.time()
             self._refresh_api_availability()
             self._refresh_rule_engines()
+            self._refresh_key_status()
         self._recompute_dirty()
 
     def comboBoxSelectionDidChange_(self, _notif):  # noqa: N802
@@ -1173,6 +1312,38 @@ class SettingsWindow(NSObject):
         """The key for the currently selected Direct-API provider (from the Keys tab)."""
         e = self._key_entry(self._provider_env_var())
         return self._key_value(e) if e else ""
+
+    # -- key status: «не работает» after a failed (auth) request (#14) ----------
+
+    @objc.python_method
+    def _keys_failing(self) -> set:
+        """Env vars whose most recent backend-tagged request failed authentication
+        (and that the user hasn't edited since). The newest event per backend wins,
+        so a later success — or fixing the key — clears the mark automatically."""
+        newest = {}  # env -> (t, is_auth_error) for the most recent relevant event
+        for ev in event_log.EVENTS.recent():  # newest first
+            env = _BACKEND_TO_KEY.get(ev.get("backend"))
+            if not env or env in newest:
+                continue
+            is_auth = ev.get("kind") == "error" and ev.get("cat") == "auth"
+            newest[env] = (ev.get("t") or 0, is_auth)
+        return {
+            env for env, (t, is_auth) in newest.items()
+            if is_auth and t >= self._key_checked_at.get(env, 0)
+        }
+
+    @objc.python_method
+    def _refresh_key_status(self):
+        bad = self._keys_failing()
+        for r in getattr(self, "_key_rows", []):
+            status = r.get("status")
+            if status is None:
+                continue
+            if r["env"] in bad:
+                status.setStringValue_(_tr("key_not_working", self._uilang))
+                status.setHidden_(False)
+            else:
+                status.setHidden_(True)
 
     # -- availability: only offer connections whose key is set (#13a) ----------
 
@@ -2035,6 +2206,7 @@ class SettingsWindow(NSObject):
         if self._capture_monitor is not None:
             NSEvent.removeMonitor_(self._capture_monitor)
             self._capture_monitor = None
+        self._set_logs_timer(False)  # stop the «Логи» auto-refresh when hidden
         NSApplication.sharedApplication().setActivationPolicy_(
             NSApplicationActivationPolicyAccessory
         )

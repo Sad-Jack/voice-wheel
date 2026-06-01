@@ -48,6 +48,7 @@ class PipelineResult:
     transcript: str
     result: str
     used_context: bool = False
+    context: str | None = None  # the clipboard text used as context (context ring)
     context_truncated: bool = False
     llm_skipped: bool = False  # an LLM ring degraded to raw transcript (no backend)
     error: str | None = None   # STT/LLM failed; result falls back to transcript
@@ -105,8 +106,8 @@ class Pipeline:
             return PipelineResult(
                 ring=ring_e.value, sector=sector, transcript=transcript,
                 result=transcript,  # fallback: at least keep what was said
-                used_context=ring_e is Ring.CONTEXT, context_truncated=truncated,
-                error=str(exc),
+                used_context=ring_e is Ring.CONTEXT, context=context,
+                context_truncated=truncated, error=str(exc),
             )
 
         return PipelineResult(
@@ -115,5 +116,6 @@ class Pipeline:
             transcript=transcript,
             result=result,
             used_context=ring_e is Ring.CONTEXT,
+            context=context,
             context_truncated=truncated,
         )
