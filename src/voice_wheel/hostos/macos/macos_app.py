@@ -33,6 +33,8 @@ from Foundation import NSObject, NSRunLoop, NSRunLoopCommonModes
 from PyObjCTools import AppHelper
 
 from ...core.config import Config, app_support_dir
+from ...core.event_log import classify_error, log_event
+from ...core.event_log import init as init_event_log
 from ...core.history import History
 from ...core.job_tracker import JobTracker
 from ...core.llm import LLMClient
@@ -243,6 +245,8 @@ class VoiceWheel(NSObject):
         self._tts_capturing = False
         state = self._speaker.toggle(str(text))
         print(f"TTS: {state}", flush=True)
+        if state == "speaking":
+            log_event("tts", text=str(text))
 
     @objc.python_method
     def _on_reuse(self, text):
@@ -351,6 +355,7 @@ class VoiceWheel(NSObject):
                 text = result.result.strip()
                 if not text:
                     color, note = "red", f"⚠️  Пусто — {result.error or 'речь не распознана'}"
+                    self._log_event_for(result)
                 else:
                     self._clipboard.write_text(result.result)
                     self._history.add(result.ring, result.sector, result.transcript, result.result)
@@ -367,11 +372,35 @@ class VoiceWheel(NSObject):
                         else:
                             tag = result.sector.upper()
                         color, note = "green", f"✅ [{tag}] → буфер: {preview}"
+                    self._log_event_for(result)
         except Exception as exc:  # noqa: BLE001
             log.exception("processing failed")
             color, note = "red", f"❌ Ошибка: {exc}"
+            log_event("error", level="error", message=str(exc), cat=classify_error(str(exc)),
+                      backend=getattr(self._llm, "_backend", ""))
         self._jobs.push_result((color, note, token))
         self.performSelectorOnMainThread_withObject_waitUntilDone_("finishProcessing:", None, False)
+
+    @objc.python_method
+    def _log_event_for(self, result):
+        """Emit a structured «Логи» event from a finished pipeline result. The
+        backend tag identifies which credential was in play (drives key status #14)."""
+        backend = self._llm.backend_for(result.sector)
+        if result.error:
+            log_event("error", level="error", message=result.error,
+                      cat=classify_error(result.error), backend=backend,
+                      transcript=result.transcript)
+        elif not result.result.strip():
+            log_event("error", level="error", message="речь не распознана", cat="stt")
+        elif result.ring == "dictate":
+            log_event("dictate", transcript=result.transcript, result=result.result)
+        elif result.ring == "context":
+            log_event("context", sector=result.sector, transcript=result.transcript,
+                      context=(result.context or ""), result=result.result, backend=backend)
+        else:  # transform
+            log_event("transform", sector=result.sector, transcript=result.transcript,
+                      result=result.result, llm_skipped=bool(result.llm_skipped),
+                      backend=backend)
 
     # -- shutdown -------------------------------------------------------------
 
@@ -560,6 +589,33 @@ def _acquire_single_instance_lock() -> bool:
     return True
 
 
+def _install_crash_logging() -> None:
+    """Record unhandled exceptions (main thread and workers) as «crash» events so
+    they show up in the «Логи» tab, then defer to the default handler."""
+    import sys
+    import threading
+
+    prev_hook = sys.excepthook
+
+    def _hook(exc_type, exc, tb):
+        try:
+            log_event("crash", level="error",
+                      message=f"{exc_type.__name__}: {exc}")
+        finally:
+            prev_hook(exc_type, exc, tb)
+
+    sys.excepthook = _hook
+
+    def _thread_hook(args):
+        if args.exc_type is SystemExit:
+            return
+        log_event("crash", level="error",
+                  message=f"{args.exc_type.__name__}: {args.exc_value}")
+        threading.__excepthook__(args)
+
+    threading.excepthook = _thread_hook
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     if not _acquire_single_instance_lock():
@@ -570,6 +626,8 @@ def main() -> None:
         log.info("another Voice Wheel instance already holds the lock; exiting")
         return
     _load_dotenv()
+    init_event_log(app_support_dir() / "events.jsonl")  # the «Логи» tab reads this
+    _install_crash_logging()
     app = NSApplication.sharedApplication()
     app.setActivationPolicy_(NSApplicationActivationPolicyAccessory)
     # Don't re-ask for Accessibility on a self-restart — it was already granted.

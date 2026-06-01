@@ -60,6 +60,11 @@ class LLMClient:
         backend, _ = self._effective(sector_key)
         return self._backend_available(backend)
 
+    def backend_for(self, sector_key=None) -> str:
+        """The backend a request for this sector would actually use (its override
+        or the default). Lets the event log tag which credential was in play."""
+        return self._effective(sector_key)[0]
+
     def _backend_available(self, backend: str) -> bool:
         if backend in _CLI_BACKENDS:
             return self._claude_path() is not None

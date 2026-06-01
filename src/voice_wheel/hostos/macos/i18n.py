@@ -21,6 +21,7 @@ STR = {
     "tab_lang": ("Язык", "Language"),
     "tab_prompts": ("Промпты", "Prompts"),
     "tab_keys": ("Ключи", "Keys"),
+    "tab_logs": ("Логи", "Logs"),
     "keys_header": ("🔑 Ключи и токены", "🔑 Keys & tokens"),
     "keys_hint": (
         "Секреты хранятся в .env (в .gitignore), применяются сразу. Введи ключ — и "
@@ -234,6 +235,33 @@ STR = {
         "⚠️ Changes to the language, triggers and recognition model (STT) take effect "
         "only after a restart — it happens automatically on «Save».",
     ),
+    # Logs tab
+    "logs_header": ("🗒 Логи", "🗒 Logs"),
+    "logs_hint": (
+        "Что приложение делало в последнее время: диктовки, обработки, озвучка и "
+        "ошибки. Свежие — сверху. Обновляется само.",
+        "What the app did recently: dictations, transforms, speech and errors. "
+        "Newest on top. Refreshes itself.",
+    ),
+    "logs_clear": ("Очистить", "Clear"),
+    "logs_empty": (
+        "Пока пусто. Сделай диктовку или обработку — здесь появится запись.",
+        "Nothing yet. Do a dictation or a transform — it will show up here.",
+    ),
+    "log_dictation": ("Диктовка", "Dictation"),
+    "log_recorded": ("Записано", "Recorded"),
+    "log_buffer": ("Буфер был", "Buffer used"),
+    "log_spoken": ("Озвучено", "Spoken"),
+    "log_error": ("Ошибка", "Error"),
+    "log_crash": ("Сбой", "Crash"),
+    # human-readable error categories (also reused for the «не работает» key status)
+    "err_auth": ("ключ не работает", "key not working"),
+    "err_rate_limit": ("превышен лимит запросов", "rate limit exceeded"),
+    "err_unreachable": ("сервер недоступен", "server unreachable"),
+    "err_model": ("модель не найдена", "model not found"),
+    "err_stt": ("речь не распознана", "speech not recognized"),
+    "err_other": ("ошибка", "error"),
+    "key_not_working": ("⚠️ ключ не работает", "⚠️ key not working"),
     # buttons / runtime notes
     "catch": ("Поймать", "Catch"),
     "catching": ("нажми…", "press…"),
