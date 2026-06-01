@@ -65,10 +65,18 @@ STR = {
     ),
     "ollama_url": ("URL", "URL"),
     "ollama_hint": (
-        "Модель через Ollama — должна быть установлена и запущена (ollama serve). "
-        "URL — локальный или свой сервер; обычно не трогаем.",
-        "A model via Ollama — it must be installed and running (ollama serve). "
-        "The URL can be local or your own remote server; usually left as-is.",
+        "Модель через Ollama — должна быть установлена и запущена. Адрес сервера "
+        "(URL) и проверка доступности — на вкладке «Модели».",
+        "A model via Ollama — it must be installed and running. The server address "
+        "(URL) and the reachability check live on the «Models» tab.",
+    ),
+    "ollama_url_hint": (
+        "Адрес Ollama-сервера, к которому обращаемся: локальный (по умолчанию "
+        "http://localhost:11434) или свой удалённый. «Проверить» — пингует адрес и "
+        "показывает статус ниже (доступен / нет).",
+        "The Ollama server we talk to: local (default http://localhost:11434) or your "
+        "own remote one. «Re-check» pings the address and shows the status below "
+        "(reachable / not).",
     ),
     "ollama_no_models_btn": ("⚠️ Нет моделей — открыть «Модели»", "⚠️ No models — open «Models»"),
     "ollama_checking": ("Проверяю Ollama…", "Checking Ollama…"),

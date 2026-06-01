@@ -104,8 +104,9 @@ def test_controls_live_inside_their_connection_group():
     assert _is_descendant(w._grp_api, w._api_model)
     assert _is_descendant(w._grp_api, w._api_no_key_btn)
     assert _is_descendant(w._grp_ollama, w._ollama)
-    assert _is_descendant(w._grp_ollama, w._ollama_url)
     assert _is_descendant(w._grp_cc, w._cc_model)
+    # the Ollama URL field now lives on the «Модели» tab, not the LLM Ollama group
+    assert not _is_descendant(w._grp_ollama, w._ollama_url)
     # and NOT mis-nested across groups
     assert not _is_descendant(w._grp_ollama, w._provider)
     assert not _is_descendant(w._grp_api, w._cc_model)

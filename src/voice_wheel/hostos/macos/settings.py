@@ -741,6 +741,12 @@ class SettingsWindow(NSObject):
         # installed list, pull). The LLM tab just picks.
         b.add_tab("tab_models", scroll=True)
         b.header("models_header")
+        # WHICH Ollama server to talk to (set first), with a reachability check whose
+        # result shows in the status line right below. Local or your own remote server.
+        self._ollama_url = b.field(w=260)
+        b.row("ollama_url", self._ollama_url,
+              b.button("ollama_recheck_btn", "recheckOllama:", 120))
+        b.hint("ollama_url_hint")
         self._ollama_state = None
         self._ollama_status = b.label("", gray=True)
         b.cur.addArrangedSubview_(self._ollama_status)
@@ -752,7 +758,6 @@ class SettingsWindow(NSObject):
         st_btns.setSpacing_(8)
         st_btns.addArrangedSubview_(self._ollama_action)
         st_btns.addArrangedSubview_(b.button("ollama_restart_btn", "restartOllama:", 190))
-        st_btns.addArrangedSubview_(b.button("ollama_recheck_btn", "recheckOllama:", 110))
         b.cur.addArrangedSubview_(st_btns)
         b.cur.addArrangedSubview_(b.label(self._t("models_installed_header"), bold=True))
         # A row per installed model — "• name (size)  [✕]" — so each can be deleted.
@@ -856,9 +861,7 @@ class SettingsWindow(NSObject):
         self._ollama_none_btn = b.button("ollama_no_models_btn", "openModelsTab:", 300)
         self._ollama_none_btn.setHidden_(True)
         b.row("model", self._ollama, self._ollama_none_btn)
-        self._ollama_url = b.field(w=250)
-        b.row("ollama_url", self._ollama_url)
-        b.hint("ollama_hint")
+        b.hint("ollama_hint")  # URL + reachability now live on the «Модели» tab
         b.hint("keys_pointer")  # remote-Ollama token lives on the «Ключи» tab
         b.hint("llm_models_pointer")
         b.cur = prev
