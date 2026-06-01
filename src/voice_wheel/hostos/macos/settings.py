@@ -442,15 +442,15 @@ class SettingsWindow(NSObject):
         self._provider.setAction_("providerChanged:")
         row("provider", self._provider)
         # masked key (#F4) + a plain mirror toggled by «Показать»
-        self._api_key = NSSecureTextField.alloc().initWithFrame_(NSMakeRect(0, 0, 200, 22))
-        self._api_key.widthAnchor().constraintEqualToConstant_(200).setActive_(True)
-        self._api_key_plain = field(w=200)
+        self._api_key = NSSecureTextField.alloc().initWithFrame_(NSMakeRect(0, 0, 180, 22))
+        self._api_key.widthAnchor().constraintEqualToConstant_(180).setActive_(True)
+        self._api_key_plain = field(w=180)
         self._api_key_plain.setHidden_(True)
         self._api_show = NSButton.checkboxWithTitle_target_action_(
             T("show_key"), self, "toggleKeyVisibility:"
         )
         row("api_key", self._api_key, self._api_key_plain, self._api_show)
-        self._api_model = combo(ANTHROPIC_MODELS)  # provider switch updates the list
+        self._api_model = combo(ANTHROPIC_MODELS, w=250)  # provider switch updates the list
         row("model", self._api_model)
         hint("api_key_hint")
         stack[0] = prev
@@ -461,7 +461,7 @@ class SettingsWindow(NSObject):
         prev, stack[0] = stack[0], self._grp_ollama
         self._ollama = combo(OLLAMA_MODELS, w=190)
         row("model", self._ollama)
-        self._ollama_url = field()
+        self._ollama_url = field(w=250)
         row("ollama_url", self._ollama_url)
         hint("ollama_hint")
         hint("llm_models_pointer")
@@ -470,7 +470,7 @@ class SettingsWindow(NSObject):
         # -- Claude Code group: model --
         self._grp_cc = group()
         prev, stack[0] = stack[0], self._grp_cc
-        self._cc_model = combo(CC_MODELS)
+        self._cc_model = combo(CC_MODELS, w=250)
         row("model", self._cc_model)
         hint("cc_hint")
         stack[0] = prev
@@ -1129,26 +1129,54 @@ class SettingsWindow(NSObject):
         model = str(self._models_pull.stringValue()).strip()
         if not model:
             return
+        url = str(self._ollama_url.stringValue()).strip() or "http://localhost:11434"
         self._models_dl_btn.setEnabled_(False)
         self._note.setStringValue_(self._t("models_downloading").format(model))
-        threading.Thread(target=self._pull_ollama, args=(model,), daemon=True).start()
+        threading.Thread(target=self._pull_ollama, args=(model, url), daemon=True).start()
 
     @objc.python_method
-    def _pull_ollama(self, model):
-        import subprocess
+    def _pull_ollama(self, model, url):
+        """Stream the pull from Ollama's /api/pull so we can show live % progress.
+        Each JSON line carries total/completed bytes; we push the percent to the note
+        on the main thread, throttled to whole-percent changes."""
+        import requests
 
-        ok = False
+        ok, error, last_pct = False, False, -1
         try:
-            proc = subprocess.run(
-                ["ollama", "pull", model], capture_output=True, text=True, timeout=1800
-            )
-            ok = proc.returncode == 0
-            if not ok:
-                log.warning("ollama pull %s: %s", model, (proc.stderr or proc.stdout or "")[:200])
-        except Exception as exc:  # noqa: BLE001 - ollama missing / not running / timeout
+            with requests.post(f"{url}/api/pull", json={"model": model, "stream": True},
+                               stream=True, timeout=(5, 1800)) as r:
+                r.raise_for_status()
+                for raw in r.iter_lines():
+                    if not raw:
+                        continue
+                    try:
+                        obj = json.loads(raw)
+                    except ValueError:
+                        continue
+                    if obj.get("error"):
+                        log.warning("ollama pull %s: %s", model, obj.get("error"))
+                        error = True
+                        break
+                    total, done = obj.get("total") or 0, obj.get("completed") or 0
+                    if total:
+                        pct = int(done * 100 / total)
+                        if pct != last_pct:
+                            last_pct = pct
+                            self._pull_progress = (model, pct, done / 1e9, total / 1e9)
+                            self.performSelectorOnMainThread_withObject_waitUntilDone_(
+                                "ollamaPullProgress:", None, False)
+            ok = not error
+        except Exception as exc:  # noqa: BLE001 - ollama down / network / timeout
             log.warning("ollama pull %s failed: %s", model, exc)
+            ok = False
         self._pull_result = (ok, model)
         self.performSelectorOnMainThread_withObject_waitUntilDone_("ollamaPullDone:", None, False)
+
+    def ollamaPullProgress_(self, _arg):  # noqa: N802
+        model, pct, done_gb, total_gb = self._pull_progress
+        self._note.setStringValue_(
+            self._t("models_downloading_pct").format(model, pct, done_gb, total_gb)
+        )
 
     def ollamaPullDone_(self, _arg):  # noqa: N802
         ok, model = self._pull_result
@@ -1156,12 +1184,12 @@ class SettingsWindow(NSObject):
         self._note.setStringValue_(
             self._t("note_ollama_pulled" if ok else "note_ollama_pull_fail").format(model)
         )
-        if ok:  # offer the freshly-pulled model where models are picked
-            for cb in (self._ollama, self._models_pull):
-                have = [str(cb.itemObjectValueAtIndex_(i)) for i in range(cb.numberOfItems())]
-                if model not in have:
-                    cb.addItemWithObjectValue_(model)
-            self._start_ollama_check()  # refresh the installed list + status
+        if ok:
+            have = [str(self._models_pull.itemObjectValueAtIndex_(i))
+                    for i in range(self._models_pull.numberOfItems())]
+            if model not in have:
+                self._models_pull.addItemWithObjectValue_(model)
+            self._start_ollama_check()  # refresh installed list, status, and the LLM picker
 
     # -- Ollama status / install / restart (Models tab) -----------------------
 
@@ -1227,6 +1255,19 @@ class SettingsWindow(NSObject):
         else:
             self._ollama_action.setHidden_(True)
         self._update_installed_label()
+        if self._ollama_state == "running":
+            self._refresh_ollama_model_combo()
+
+    @objc.python_method
+    def _refresh_ollama_model_combo(self):
+        """The LLM-tab model picker's dropdown lists only INSTALLED models (downloading
+        lives on the Models tab, so non-downloaded models are no longer offered).
+        Keeps the currently configured value in the editable field."""
+        installed = [name for name, _ in getattr(self, "_ollama_models", [])]
+        cur = str(self._ollama.stringValue())
+        self._ollama.removeAllItems()
+        self._ollama.addItemsWithObjectValues_(installed)
+        self._ollama.setStringValue_(cur)
 
     @objc.python_method
     def _update_installed_label(self):

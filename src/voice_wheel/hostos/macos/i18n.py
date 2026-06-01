@@ -89,6 +89,10 @@ STR = {
     "ollama_library_btn": ("🔗 Библиотека моделей Ollama", "🔗 Ollama model library"),
     "models_pull_btn": ("Скачать", "Download"),
     "models_downloading": ("⏳ Скачиваю «{}»… (может занять минуты)", "⏳ Downloading «{}»… (may take minutes)"),
+    "models_downloading_pct": (
+        "⏳ «{}» · {}%  ({:.1f}/{:.1f} GB)",
+        "⏳ «{}» · {}%  ({:.1f}/{:.1f} GB)",
+    ),
     "llm_models_pointer": (
         "Скачивание и список установленных моделей — на вкладке «Модели».",
         "Downloading and the installed-models list live on the «Models» tab.",
