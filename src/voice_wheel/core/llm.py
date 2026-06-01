@@ -165,13 +165,21 @@ class LLMClient:
 
     # -- ollama backend -------------------------------------------------------
 
+    @staticmethod
+    def ollama_auth_headers() -> dict:
+        """Bearer header for an authed (e.g. hosted/remote) Ollama, if a token is set
+        in OLLAMA_API_KEY (loaded from .env). Empty for a plain local Ollama."""
+        token = os.environ.get("OLLAMA_API_KEY", "").strip()
+        return {"Authorization": f"Bearer {token}"} if token else {}
+
     def _ollama_reachable(self) -> bool:
         if self._ollama_ok:
             return True
         try:
             import requests
 
-            requests.get(f"{self._cfg.ollama_url}/api/tags", timeout=2)
+            requests.get(f"{self._cfg.ollama_url}/api/tags", timeout=2,
+                         headers=self.ollama_auth_headers())
             self._ollama_ok = True
         except Exception as exc:  # noqa: BLE001 - any error = treat ollama as unreachable
             log.debug("ollama not reachable at %s: %s", self._cfg.ollama_url, exc)
@@ -194,6 +202,7 @@ class LLMClient:
                 "options": {"temperature": 0.3, "num_predict": self._cfg.max_tokens},
             },
             timeout=(5, 60),  # (connect, read) — fail fast instead of hanging
+            headers=self.ollama_auth_headers(),
         )
         resp.raise_for_status()
         return str(resp.json().get("message", {}).get("content", "")).strip()
@@ -214,6 +223,7 @@ class LLMClient:
                 f"{self._cfg.ollama_url}/api/generate",
                 json={"model": self._cfg.ollama_model, "keep_alive": 0},
                 timeout=(2, 5),
+                headers=self.ollama_auth_headers(),
             )
             log.info("ollama model %s unloaded on exit", self._cfg.ollama_model)
         except Exception as exc:  # noqa: BLE001 - best effort; never block shutdown

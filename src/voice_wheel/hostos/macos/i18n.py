@@ -55,6 +55,13 @@ STR = {
         "A model via Ollama — it must be installed and running (ollama serve). "
         "The URL can be local or your own remote server; usually left as-is.",
     ),
+    "ollama_token": ("Токен (опц.)", "Token (opt.)"),
+    "ollama_token_hint": (
+        "Для удалённой Ollama с авторизацией (заголовок Bearer). Локальной обычно не "
+        "нужен — оставь пустым. Хранится в .env, применяется сразу.",
+        "For a remote Ollama behind auth (Bearer header). A local one usually needs "
+        "none — leave empty. Stored in .env, applies immediately.",
+    ),
     "ollama_checking": ("Проверяю Ollama…", "Checking Ollama…"),
     "ollama_running": ("✅ Ollama запущена", "✅ Ollama is running"),
     "ollama_not_running": (
