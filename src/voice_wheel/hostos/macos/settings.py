@@ -421,7 +421,7 @@ class SettingsWindow(NSObject):
 
         # Connection type: three radios; only the selected type's settings show (#36).
         self._conn_radios = []
-        for tkey, lblkey in (("api", "conn_api"), ("ollama", "conn_ollama"), ("cc", "conn_cc")):
+        for tkey, lblkey in (("ollama", "conn_ollama"), ("cc", "conn_cc"), ("api", "conn_api")):
             rb = NSButton.radioButtonWithTitle_target_action_(T(lblkey), self, "connTypeChanged:")
             stack[0].addArrangedSubview_(rb)
             self._conn_radios.append((rb, tkey))
@@ -641,7 +641,8 @@ class SettingsWindow(NSObject):
         root.addSubview_(self._save_btn)
 
         self._window = win
-        self._conn_radios[1][0].setState_(1)  # default to Ollama; _load re-applies
+        for rb, tkey in self._conn_radios:  # default to Ollama; _load re-applies the saved type
+            rb.setState_(1 if tkey == "ollama" else 0)
         self._apply_conn_visibility()
         self._wire_dirty()
         self._set_tooltips()
