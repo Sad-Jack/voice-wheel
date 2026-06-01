@@ -52,3 +52,25 @@ def test_unload_swallows_errors(monkeypatch):
     monkeypatch.setitem(sys.modules, "requests", _fake_requests(captured, boom=True))
     LLMClient(LLMConfig(backend="ollama")).unload()  # must not raise — never block shutdown
     assert len(captured) == 1
+
+
+def test_ollama_error_surfaces_model_not_found(monkeypatch):
+    """A 404 must raise Ollama's own «model 'X' not found» (so the «Логи» line says
+    WHICH model is missing), not a bare «404 ... /api/chat»."""
+    import pytest
+
+    from voice_wheel.core.event_log import classify_error
+
+    def post(url, json=None, timeout=None, headers=None):
+        return SimpleNamespace(
+            ok=False, status_code=404, url=url, text="",
+            json=lambda: {"error": "model 'qwen2.5:3b' not found, try pulling it first"},
+        )
+
+    monkeypatch.delenv("OLLAMA_API_KEY", raising=False)
+    monkeypatch.setitem(sys.modules, "requests", SimpleNamespace(post=post))
+    c = LLMClient(LLMConfig(backend="ollama", ollama_model="qwen2.5:3b"))
+    with pytest.raises(RuntimeError) as ei:
+        c.complete("system", "user")
+    assert "qwen2.5:3b" in str(ei.value) and "not found" in str(ei.value)
+    assert classify_error(str(ei.value)) == "model"  # the «Логи» error bucket

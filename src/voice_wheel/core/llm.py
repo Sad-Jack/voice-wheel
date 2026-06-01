@@ -209,7 +209,16 @@ class LLMClient:
             timeout=(5, 60),  # (connect, read) — fail fast instead of hanging
             headers=self.ollama_auth_headers(),
         )
-        resp.raise_for_status()
+        if not resp.ok:
+            # Surface Ollama's own message (e.g. "model 'qwen2.5:3b' not found, try
+            # pulling it first") instead of a bare "404 ... /api/chat", so the log says
+            # WHICH model is missing and what to do.
+            detail = ""
+            try:
+                detail = str(resp.json().get("error", "")).strip()
+            except ValueError:
+                detail = (resp.text or "").strip()
+            raise RuntimeError(detail or f"Ollama HTTP {resp.status_code} for {resp.url}")
         return str(resp.json().get("message", {}).get("content", "")).strip()
 
     def unload(self) -> None:
