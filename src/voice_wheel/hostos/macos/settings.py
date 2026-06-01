@@ -571,72 +571,9 @@ class SettingsWindow(NSObject):
         stack = [None]   # the current tab's vertical NSStackView (Auto-Layout, auto-aligns)
 
         b = _TabBuilder(self, tabs, stack)
-        # aliases so the still-inline tab blocks read unchanged; each is dropped as
-        # its tab is extracted, and the lot disappears once every tab is a method.
-        add_tab = b.add_tab
-        header = b.header
-        hint = b.hint
-        row = b.row
-        popup = b.popup
-        field = b.field
-        combo = b.combo
-        button = b.button
-        group = b.group
 
-        # ---- LLM tab (scrollable: base config + up to one rule per prompt) ----
-        add_tab("tab_llm", scroll=True)
-        header("llm_header")
-        hint("llm_hint")
-
-        # Connection type: three radios; only the selected type's settings show (#36).
-        self._conn_radios = []
-        for tkey, lblkey in (("ollama", "conn_ollama"), ("cc", "conn_cc"), ("api", "conn_api")):
-            rb = NSButton.radioButtonWithTitle_target_action_(T(lblkey), self, "connTypeChanged:")
-            stack[0].addArrangedSubview_(rb)
-            self._conn_radios.append((rb, tkey))
-
-        # -- Direct API group: provider + model. The key lives on the «Ключи» tab. --
-        self._grp_api = group()
-        prev, stack[0] = stack[0], self._grp_api
-        self._provider = popup(["Anthropic", "OpenAI"], w=160)
-        self._provider.setTarget_(self)
-        self._provider.setAction_("providerChanged:")
-        self._provider_row = row("provider", self._provider)
-        self._api_model = combo(ANTHROPIC_MODELS, w=250)  # provider switch updates the list
-        self._api_model_row = row("model", self._api_model)
-        # shown instead of provider/model when no provider has a key on the «Ключи» tab
-        self._api_no_key_btn = button("keys_redirect_btn", "openKeysTab:", 360)
-        self._api_no_key_btn.setHidden_(True)
-        stack[0].addArrangedSubview_(self._api_no_key_btn)
-        # (no «ключи на вкладке Ключи» hint here — the redirect button already says it,
-        #  and when a key is present the provider/model rows speak for themselves)
-        stack[0] = prev
-
-        # -- Ollama group: pick the model + URL. Downloading, installed list and
-        #    status/restart live on the «Модели» tab (no duplicate controls here). --
-        self._grp_ollama = group()
-        prev, stack[0] = stack[0], self._grp_ollama
-        # A pure selector of INSTALLED models (filled live from /api/tags) — no
-        # free-text. When nothing is installed, the popup is swapped for a button
-        # that jumps to the «Модели» tab. Download / manage models there.
-        self._ollama = popup([], w=200)
-        self._ollama_none_btn = button("ollama_no_models_btn", "openModelsTab:", 300)
-        self._ollama_none_btn.setHidden_(True)
-        row("model", self._ollama, self._ollama_none_btn)
-        self._ollama_url = field(w=250)
-        row("ollama_url", self._ollama_url)
-        hint("ollama_hint")
-        hint("keys_pointer")  # remote-Ollama token lives on the «Ключи» tab
-        hint("llm_models_pointer")
-        stack[0] = prev
-
-        # -- Claude Code group: model --
-        self._grp_cc = group()
-        prev, stack[0] = stack[0], self._grp_cc
-        self._cc_model = combo(CC_MODELS, w=250)
-        row("model", self._cc_model)
-        hint("cc_hint")
-        stack[0] = prev
+        # ---- LLM tab ----
+        self._build_llm(b)
 
         # ---- Models tab ----
         self._build_models(b)
@@ -911,6 +848,63 @@ class SettingsWindow(NSObject):
         key_row("key_anthropic", "ANTHROPIC_API_KEY")
         key_row("key_openai", "OPENAI_API_KEY")
         key_row("key_ollama", "OLLAMA_API_KEY")
+
+    @objc.python_method
+    def _build_llm(self, b):
+        # base config + up to one rule per prompt (scrollable)
+        b.add_tab("tab_llm", scroll=True)
+        b.header("llm_header")
+        b.hint("llm_hint")
+
+        # Connection type: three radios; only the selected type's settings show (#36).
+        self._conn_radios = []
+        for tkey, lblkey in (("ollama", "conn_ollama"), ("cc", "conn_cc"), ("api", "conn_api")):
+            rb = NSButton.radioButtonWithTitle_target_action_(self._t(lblkey), self, "connTypeChanged:")
+            b.cur.addArrangedSubview_(rb)
+            self._conn_radios.append((rb, tkey))
+
+        # -- Direct API group: provider + model. The key lives on the «Ключи» tab. --
+        self._grp_api = b.group()
+        prev, b.cur = b.cur, self._grp_api
+        self._provider = b.popup(["Anthropic", "OpenAI"], w=160)
+        self._provider.setTarget_(self)
+        self._provider.setAction_("providerChanged:")
+        self._provider_row = b.row("provider", self._provider)
+        self._api_model = b.combo(ANTHROPIC_MODELS, w=250)  # provider switch updates the list
+        self._api_model_row = b.row("model", self._api_model)
+        # shown instead of provider/model when no provider has a key on the «Ключи» tab
+        self._api_no_key_btn = b.button("keys_redirect_btn", "openKeysTab:", 360)
+        self._api_no_key_btn.setHidden_(True)
+        b.cur.addArrangedSubview_(self._api_no_key_btn)
+        # (no «ключи на вкладке Ключи» hint here — the redirect button already says it,
+        #  and when a key is present the provider/model rows speak for themselves)
+        b.cur = prev
+
+        # -- Ollama group: pick the model + URL. Downloading, installed list and
+        #    status/restart live on the «Модели» tab (no duplicate controls here). --
+        self._grp_ollama = b.group()
+        prev, b.cur = b.cur, self._grp_ollama
+        # A pure selector of INSTALLED models (filled live from /api/tags) — no
+        # free-text. When nothing is installed, the popup is swapped for a button
+        # that jumps to the «Модели» tab. Download / manage models there.
+        self._ollama = b.popup([], w=200)
+        self._ollama_none_btn = b.button("ollama_no_models_btn", "openModelsTab:", 300)
+        self._ollama_none_btn.setHidden_(True)
+        b.row("model", self._ollama, self._ollama_none_btn)
+        self._ollama_url = b.field(w=250)
+        b.row("ollama_url", self._ollama_url)
+        b.hint("ollama_hint")
+        b.hint("keys_pointer")  # remote-Ollama token lives on the «Ключи» tab
+        b.hint("llm_models_pointer")
+        b.cur = prev
+
+        # -- Claude Code group: model --
+        self._grp_cc = b.group()
+        prev, b.cur = b.cur, self._grp_cc
+        self._cc_model = b.combo(CC_MODELS, w=250)
+        b.row("model", self._cc_model)
+        b.hint("cc_hint")
+        b.cur = prev
 
     @objc.python_method
     def _set_tooltips(self):
