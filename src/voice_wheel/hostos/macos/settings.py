@@ -228,6 +228,154 @@ _BACKEND_TO_KEY = {
 }
 
 
+class _TabBuilder:
+    """The UI-construction primitives for the settings tabs, lifted out of the
+    `SettingsWindow._build` mega-method so each tab can be built by its own method.
+
+    Plain Python on purpose (NOT an NSObject): it defines no selectors and is never
+    a target/delegate, so there is no ObjC selector-registration hazard — every
+    control it makes is wired to `window` (the SettingsWindow), whose selectors do
+    the work. `cur` is the current vertical container; it reads/writes a shared
+    1-element `stack` list so `_build` and the builder always agree on it."""
+
+    def __init__(self, window, tabs, stack):
+        self.window = window
+        self.tabs = tabs
+        self._stack = stack  # 1-element list shared with _build
+
+    @property
+    def cur(self):
+        return self._stack[0]
+
+    @cur.setter
+    def cur(self, value):
+        self._stack[0] = value
+
+    def _t(self, key):
+        return self.window._t(key)  # live: follows the window's current language
+
+    def add_tab(self, key, scroll=False):
+        tab_w, tab_h = W - 28, H - 138  # tracks the tabs frame height (− tab bar/insets)
+        v = NSStackView.alloc().init()
+        v.setOrientation_(NSUserInterfaceLayoutOrientationVertical)
+        v.setAlignment_(NSLayoutAttributeLeading)
+        v.setSpacing_(8)
+        v.setTranslatesAutoresizingMaskIntoConstraints_(False)
+        doc = _FlippedView.alloc().initWithFrame_(NSMakeRect(0, 0, tab_w, tab_h))
+        doc.addSubview_(v)
+        cons = [
+            v.topAnchor().constraintEqualToAnchor_constant_(doc.topAnchor(), 16),
+            v.leadingAnchor().constraintEqualToAnchor_constant_(doc.leadingAnchor(), 18),
+        ]
+        if scroll:
+            # The document view grows with its content; the scroll view shows a
+            # vertical scroller only when it overflows the tab (autohide).
+            doc.setTranslatesAutoresizingMaskIntoConstraints_(False)
+            sv = NSScrollView.alloc().initWithFrame_(NSMakeRect(0, 0, tab_w, tab_h))
+            sv.setHasVerticalScroller_(True)
+            sv.setHasHorizontalScroller_(False)
+            sv.setDrawsBackground_(False)
+            sv.setAutohidesScrollers_(True)
+            sv.setDocumentView_(doc)
+            cons += [
+                doc.widthAnchor().constraintEqualToAnchor_(sv.contentView().widthAnchor()),
+                doc.bottomAnchor().constraintEqualToAnchor_constant_(v.bottomAnchor(), 16),
+            ]
+            view = sv
+        else:
+            view = doc
+        NSLayoutConstraint.activateConstraints_(cons)
+        item = NSTabViewItem.alloc().initWithIdentifier_(key)
+        item.setLabel_(self._t(key))
+        item.setView_(view)
+        self.tabs.addTabViewItem_(item)
+        self.cur = v
+
+    def label(self, s, bold=False, gray=False, width=None):
+        f = NSTextField.labelWithString_(s)
+        f.setFont_(NSFont.boldSystemFontOfSize_(13) if bold else NSFont.systemFontOfSize_(11 if gray else 12))
+        if gray:
+            f.setTextColor_(NSColor.secondaryLabelColor())
+        if width is not None:
+            f.widthAnchor().constraintEqualToConstant_(width).setActive_(True)
+        return f
+
+    def header(self, key):
+        self.cur.addArrangedSubview_(self.label(self._t(key), bold=True))
+
+    def hint(self, key):
+        # Wrap long explanatory text within the tab instead of letting the
+        # single-line label run off the right edge (container W-28, leading 18).
+        wrap_w = W - 68
+        lab = self.label(self._t(key), gray=True)
+        lab.setUsesSingleLineMode_(False)
+        lab.setLineBreakMode_(NSLineBreakByWordWrapping)
+        lab.setMaximumNumberOfLines_(0)
+        lab.setPreferredMaxLayoutWidth_(wrap_w)
+        lab.widthAnchor().constraintLessThanOrEqualToConstant_(wrap_w).setActive_(True)
+        self.cur.addArrangedSubview_(lab)
+
+    def row(self, label_key, *controls):
+        h = NSStackView.alloc().init()
+        h.setOrientation_(NSUserInterfaceLayoutOrientationHorizontal)
+        h.setAlignment_(NSLayoutAttributeCenterY)
+        h.setSpacing_(8)
+        h.addArrangedSubview_(self.label(self._t(label_key) if label_key else "", width=150))
+        for c in controls:
+            h.addArrangedSubview_(c)
+        self.cur.addArrangedSubview_(h)
+        return h
+
+    def popup(self, items, w=300):
+        p = NSPopUpButton.alloc().initWithFrame_pullsDown_(NSMakeRect(0, 0, w, 26), False)
+        p.addItemsWithTitles_(items)
+        p.widthAnchor().constraintEqualToConstant_(w).setActive_(True)
+        return p
+
+    def field(self, w=300):
+        t = NSTextField.alloc().initWithFrame_(NSMakeRect(0, 0, w, 22))
+        t.widthAnchor().constraintEqualToConstant_(w).setActive_(True)
+        return t
+
+    def combo(self, items, w=300):
+        # editable: pick a recommendation from the dropdown, or type a custom one
+        c = NSComboBox.alloc().initWithFrame_(NSMakeRect(0, 0, w, 26))
+        c.addItemsWithObjectValues_(items)
+        c.setCompletes_(True)
+        c.widthAnchor().constraintEqualToConstant_(w).setActive_(True)
+        return c
+
+    def checkbox(self, key):
+        return NSButton.checkboxWithTitle_target_action_(self._t(key), None, None)
+
+    def button(self, key, action, w):
+        b = NSButton.buttonWithTitle_target_action_(self._t(key), self.window, action)
+        b.widthAnchor().constraintEqualToConstant_(w).setActive_(True)
+        return b
+
+    def trig_row(self, key, *controls):
+        # a trigger row whose label is an on/off checkbox; off = row locked
+        cb = NSButton.checkboxWithTitle_target_action_(self._t(key), self.window, "triggerToggled:")
+        cb.widthAnchor().constraintEqualToConstant_(150).setActive_(True)
+        h = NSStackView.alloc().init()
+        h.setOrientation_(NSUserInterfaceLayoutOrientationHorizontal)
+        h.setAlignment_(NSLayoutAttributeCenterY)
+        h.setSpacing_(8)
+        h.addArrangedSubview_(cb)
+        for c in controls:
+            h.addArrangedSubview_(c)
+        self.cur.addArrangedSubview_(h)
+        return cb
+
+    def group(self):
+        g = NSStackView.alloc().init()
+        g.setOrientation_(NSUserInterfaceLayoutOrientationVertical)
+        g.setAlignment_(NSLayoutAttributeLeading)
+        g.setSpacing_(6)
+        self.cur.addArrangedSubview_(g)
+        return g
+
+
 class SettingsWindow(NSObject):
     def init(self):
         self = objc.super(SettingsWindow, self).init()
@@ -399,8 +547,7 @@ class SettingsWindow(NSObject):
             return
         self._uilang = resolve_lang(self._read().get("ui_language"))
 
-        def T(key):
-            return _tr(key, self._uilang)
+        T = self._t  # this window's live translator
 
         win = NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
             NSMakeRect(0, 0, W, H),
@@ -423,375 +570,34 @@ class SettingsWindow(NSObject):
 
         stack = [None]   # the current tab's vertical NSStackView (Auto-Layout, auto-aligns)
 
-        def add_tab(key, scroll=False):
-            tab_w, tab_h = W - 28, H - 138  # tracks the tabs frame height (− tab bar/insets)
-            v = NSStackView.alloc().init()
-            v.setOrientation_(NSUserInterfaceLayoutOrientationVertical)
-            v.setAlignment_(NSLayoutAttributeLeading)
-            v.setSpacing_(8)
-            v.setTranslatesAutoresizingMaskIntoConstraints_(False)
-            doc = _FlippedView.alloc().initWithFrame_(NSMakeRect(0, 0, tab_w, tab_h))
-            doc.addSubview_(v)
-            cons = [
-                v.topAnchor().constraintEqualToAnchor_constant_(doc.topAnchor(), 16),
-                v.leadingAnchor().constraintEqualToAnchor_constant_(doc.leadingAnchor(), 18),
-            ]
-            if scroll:
-                # The document view grows with its content; the scroll view shows a
-                # vertical scroller only when it overflows the tab (autohide).
-                doc.setTranslatesAutoresizingMaskIntoConstraints_(False)
-                sv = NSScrollView.alloc().initWithFrame_(NSMakeRect(0, 0, tab_w, tab_h))
-                sv.setHasVerticalScroller_(True)
-                sv.setHasHorizontalScroller_(False)
-                sv.setDrawsBackground_(False)
-                sv.setAutohidesScrollers_(True)
-                sv.setDocumentView_(doc)
-                cons += [
-                    doc.widthAnchor().constraintEqualToAnchor_(sv.contentView().widthAnchor()),
-                    doc.bottomAnchor().constraintEqualToAnchor_constant_(v.bottomAnchor(), 16),
-                ]
-                view = sv
-            else:
-                view = doc
-            NSLayoutConstraint.activateConstraints_(cons)
-            item = NSTabViewItem.alloc().initWithIdentifier_(key)
-            item.setLabel_(T(key))
-            item.setView_(view)
-            tabs.addTabViewItem_(item)
-            stack[0] = v
+        b = _TabBuilder(self, tabs, stack)
 
-        def label(s, bold=False, gray=False, width=None):
-            f = NSTextField.labelWithString_(s)
-            f.setFont_(NSFont.boldSystemFontOfSize_(13) if bold else NSFont.systemFontOfSize_(11 if gray else 12))
-            if gray:
-                f.setTextColor_(NSColor.secondaryLabelColor())
-            if width is not None:
-                f.widthAnchor().constraintEqualToConstant_(width).setActive_(True)
-            return f
+        # ---- LLM tab ----
+        self._build_llm(b)
 
-        def header(key):
-            stack[0].addArrangedSubview_(label(T(key), bold=True))
+        # ---- Models tab ----
+        self._build_models(b)
 
-        def hint(key):
-            # Wrap long explanatory text within the tab instead of letting the
-            # single-line label run off the right edge (container W-28, leading 18).
-            wrap_w = W - 68
-            lab = label(T(key), gray=True)
-            lab.setUsesSingleLineMode_(False)
-            lab.setLineBreakMode_(NSLineBreakByWordWrapping)
-            lab.setMaximumNumberOfLines_(0)
-            lab.setPreferredMaxLayoutWidth_(wrap_w)
-            lab.widthAnchor().constraintLessThanOrEqualToConstant_(wrap_w).setActive_(True)
-            stack[0].addArrangedSubview_(lab)
+        # ---- Prompts tab ----
+        self._build_prompts(b)
 
-        def row(label_key, *controls):
-            h = NSStackView.alloc().init()
-            h.setOrientation_(NSUserInterfaceLayoutOrientationHorizontal)
-            h.setAlignment_(NSLayoutAttributeCenterY)
-            h.setSpacing_(8)
-            h.addArrangedSubview_(label(T(label_key) if label_key else "", width=150))
-            for c in controls:
-                h.addArrangedSubview_(c)
-            stack[0].addArrangedSubview_(h)
-            return h
-
-        def popup(items, w=300):
-            p = NSPopUpButton.alloc().initWithFrame_pullsDown_(NSMakeRect(0, 0, w, 26), False)
-            p.addItemsWithTitles_(items)
-            p.widthAnchor().constraintEqualToConstant_(w).setActive_(True)
-            return p
-
-        def field(w=300):
-            t = NSTextField.alloc().initWithFrame_(NSMakeRect(0, 0, w, 22))
-            t.widthAnchor().constraintEqualToConstant_(w).setActive_(True)
-            return t
-
-        def combo(items, w=300):
-            # editable: pick a recommendation from the dropdown, or type a custom one
-            c = NSComboBox.alloc().initWithFrame_(NSMakeRect(0, 0, w, 26))
-            c.addItemsWithObjectValues_(items)
-            c.setCompletes_(True)
-            c.widthAnchor().constraintEqualToConstant_(w).setActive_(True)
-            return c
-
-        def checkbox(key):
-            return NSButton.checkboxWithTitle_target_action_(T(key), None, None)
-
-        def button(key, action, w):
-            b = NSButton.buttonWithTitle_target_action_(T(key), self, action)
-            b.widthAnchor().constraintEqualToConstant_(w).setActive_(True)
-            return b
-
-        def trig_row(key, *controls):
-            # a trigger row whose label is an on/off checkbox; off = row locked
-            cb = NSButton.checkboxWithTitle_target_action_(T(key), self, "triggerToggled:")
-            cb.widthAnchor().constraintEqualToConstant_(150).setActive_(True)
-            h = NSStackView.alloc().init()
-            h.setOrientation_(NSUserInterfaceLayoutOrientationHorizontal)
-            h.setAlignment_(NSLayoutAttributeCenterY)
-            h.setSpacing_(8)
-            h.addArrangedSubview_(cb)
-            for c in controls:
-                h.addArrangedSubview_(c)
-            stack[0].addArrangedSubview_(h)
-            return cb
-
-        # ---- LLM tab (scrollable: base config + up to one rule per prompt) ----
-        add_tab("tab_llm", scroll=True)
-        header("llm_header")
-        hint("llm_hint")
-
-        # Connection type: three radios; only the selected type's settings show (#36).
-        self._conn_radios = []
-        for tkey, lblkey in (("ollama", "conn_ollama"), ("cc", "conn_cc"), ("api", "conn_api")):
-            rb = NSButton.radioButtonWithTitle_target_action_(T(lblkey), self, "connTypeChanged:")
-            stack[0].addArrangedSubview_(rb)
-            self._conn_radios.append((rb, tkey))
-
-        def group():
-            g = NSStackView.alloc().init()
-            g.setOrientation_(NSUserInterfaceLayoutOrientationVertical)
-            g.setAlignment_(NSLayoutAttributeLeading)
-            g.setSpacing_(6)
-            stack[0].addArrangedSubview_(g)
-            return g
-
-        # -- Direct API group: provider + model. The key lives on the «Ключи» tab. --
-        self._grp_api = group()
-        prev, stack[0] = stack[0], self._grp_api
-        self._provider = popup(["Anthropic", "OpenAI"], w=160)
-        self._provider.setTarget_(self)
-        self._provider.setAction_("providerChanged:")
-        self._provider_row = row("provider", self._provider)
-        self._api_model = combo(ANTHROPIC_MODELS, w=250)  # provider switch updates the list
-        self._api_model_row = row("model", self._api_model)
-        # shown instead of provider/model when no provider has a key on the «Ключи» tab
-        self._api_no_key_btn = button("keys_redirect_btn", "openKeysTab:", 360)
-        self._api_no_key_btn.setHidden_(True)
-        stack[0].addArrangedSubview_(self._api_no_key_btn)
-        # (no «ключи на вкладке Ключи» hint here — the redirect button already says it,
-        #  and when a key is present the provider/model rows speak for themselves)
-        stack[0] = prev
-
-        # -- Ollama group: pick the model + URL. Downloading, installed list and
-        #    status/restart live on the «Модели» tab (no duplicate controls here). --
-        self._grp_ollama = group()
-        prev, stack[0] = stack[0], self._grp_ollama
-        # A pure selector of INSTALLED models (filled live from /api/tags) — no
-        # free-text. When nothing is installed, the popup is swapped for a button
-        # that jumps to the «Модели» tab. Download / manage models there.
-        self._ollama = popup([], w=200)
-        self._ollama_none_btn = button("ollama_no_models_btn", "openModelsTab:", 300)
-        self._ollama_none_btn.setHidden_(True)
-        row("model", self._ollama, self._ollama_none_btn)
-        self._ollama_url = field(w=250)
-        row("ollama_url", self._ollama_url)
-        hint("ollama_hint")
-        hint("keys_pointer")  # remote-Ollama token lives on the «Ключи» tab
-        hint("llm_models_pointer")
-        stack[0] = prev
-
-        # -- Claude Code group: model --
-        self._grp_cc = group()
-        prev, stack[0] = stack[0], self._grp_cc
-        self._cc_model = combo(CC_MODELS, w=250)
-        row("model", self._cc_model)
-        hint("cc_hint")
-        stack[0] = prev
-
-        # ---- Models tab: one place to download & manage local Ollama models
-        #      (live status + restart, installed list, pull). The LLM tab just picks.
-        add_tab("tab_models", scroll=True)
-        header("models_header")
-        self._ollama_state = None
-        self._ollama_status = label("", gray=True)
-        stack[0].addArrangedSubview_(self._ollama_status)
-        self._ollama_action = NSButton.buttonWithTitle_target_action_("", self, "ollamaAction:")
-        self._ollama_action.widthAnchor().constraintEqualToConstant_(200).setActive_(True)
-        self._ollama_action.setHidden_(True)  # only shown for Install/Start
-        st_btns = NSStackView.alloc().init()
-        st_btns.setOrientation_(NSUserInterfaceLayoutOrientationHorizontal)
-        st_btns.setSpacing_(8)
-        st_btns.addArrangedSubview_(self._ollama_action)
-        st_btns.addArrangedSubview_(button("ollama_restart_btn", "restartOllama:", 190))
-        st_btns.addArrangedSubview_(button("ollama_recheck_btn", "recheckOllama:", 110))
-        stack[0].addArrangedSubview_(st_btns)
-        stack[0].addArrangedSubview_(label(T("models_installed_header"), bold=True))
-        # A row per installed model — "• name (size)  [✕]" — so each can be deleted.
-        self._models_installed = NSStackView.alloc().init()
-        self._models_installed.setOrientation_(NSUserInterfaceLayoutOrientationVertical)
-        self._models_installed.setAlignment_(NSLayoutAttributeLeading)
-        self._models_installed.setSpacing_(4)
-        self._installed_rows = []
-        stack[0].addArrangedSubview_(self._models_installed)
-        stack[0].addArrangedSubview_(label(T("models_download_header"), bold=True))
-        self._models_pull = combo(OLLAMA_MODELS, w=220)
-        self._models_dl_btn = button("models_pull_btn", "downloadOllama:", 110)
-        dl_row = NSStackView.alloc().init()
-        dl_row.setOrientation_(NSUserInterfaceLayoutOrientationHorizontal)
-        dl_row.setSpacing_(8)
-        dl_row.addArrangedSubview_(self._models_pull)
-        dl_row.addArrangedSubview_(self._models_dl_btn)
-        stack[0].addArrangedSubview_(dl_row)
-        hint("models_download_hint")
-        stack[0].addArrangedSubview_(button("ollama_library_btn", "openOllamaLibrary:", 250))
-
-        # ---- Prompts tab: the wheel's sectors (count + folder access) and the
-        #      optional per-prompt model rules. Read FRESH from the folder so a
-        #      just-added prompt shows here without a restart (wheel applies on restart).
-        add_tab("tab_prompts", scroll=True)
-        self._sectors = list(load_sectors())
-        header("prompts_header")
-        self._prompts_label = label("", gray=True)
-        stack[0].addArrangedSubview_(self._prompts_label)
-        prompt_btns = NSStackView.alloc().init()
-        prompt_btns.setOrientation_(NSUserInterfaceLayoutOrientationHorizontal)
-        prompt_btns.setSpacing_(8)
-        prompt_btns.addArrangedSubview_(button("open_prompts_folder", "openPromptsFolder:", 230))
-        prompt_btns.addArrangedSubview_(button("refresh_prompts", "refreshPrompts:", 110))
-        stack[0].addArrangedSubview_(prompt_btns)
-        hint("prompts_hint")
-        self._refresh_prompts_label()
-        header("rules_header")
-        hint("rules_hint")
-        self._rules_stack = NSStackView.alloc().init()
-        self._rules_stack.setOrientation_(NSUserInterfaceLayoutOrientationVertical)
-        self._rules_stack.setAlignment_(NSLayoutAttributeLeading)
-        self._rules_stack.setSpacing_(6)
-        stack[0].addArrangedSubview_(self._rules_stack)
-        self._add_rule_btn = button("add_rule", "addRule:", 180)
-        stack[0].addArrangedSubview_(self._add_rule_btn)
-
-        # ---- Keys tab: every secret in one place (each masked + «Показать»),
-        #      stored in .env. The LLM tab / rules just pick a connection. ----
-        add_tab("tab_keys", scroll=True)
-        header("keys_header")
-        hint("keys_hint")
-        self._key_rows = []
-
-        def key_row(label_key, env_var):
-            secure = NSSecureTextField.alloc().initWithFrame_(NSMakeRect(0, 0, 320, 22))
-            secure.widthAnchor().constraintEqualToConstant_(320).setActive_(True)
-            plain = field(w=320)
-            plain.setHidden_(True)
-            secure.setDelegate_(self)
-            plain.setDelegate_(self)  # both -> controlTextDidChange_ -> dirty
-            # a momentary eye button (icon only): click reveals the key; it re-masks
-            # on tab switch / window close (see _mask_all_keys) — never a sticky checkbox
-            eye = NSButton.alloc().init()
-            eye.setBordered_(False)
-            eye.setTitle_("")
-            eimg = NSImage.imageWithSystemSymbolName_accessibilityDescription_("eye", T("show_key"))
-            eye.setImage_(eimg) if eimg is not None else eye.setTitle_("👁")
-            eye.setToolTip_(T("show_key"))
-            eye.setTarget_(self)
-            eye.setAction_("toggleKeyRow:")
-            eye.widthAnchor().constraintEqualToConstant_(28).setActive_(True)
-            # red «не работает» badge — hidden until a request fails auth (#14)
-            status = label("", gray=False)
-            status.setTextColor_(NSColor.systemRedColor())
-            status.setHidden_(True)
-            self._key_rows.append({
-                "env": env_var, "secure": secure, "plain": plain, "eye": eye, "status": status,
-            })
-            row(label_key, secure, plain, eye).addArrangedSubview_(status)
-
-        key_row("key_anthropic", "ANTHROPIC_API_KEY")
-        key_row("key_openai", "OPENAI_API_KEY")
-        key_row("key_ollama", "OLLAMA_API_KEY")
+        # ---- Keys tab ----
+        self._build_keys(b)
 
         # ---- Speech (STT) tab ----
-        add_tab("tab_stt")
-        header("stt_header")
-        self._stt_backend = popup(STT_BACKENDS)
-        row("engine", self._stt_backend)
-        hint("stt_engine_hint")
-        self._stt_model = popup(STT_MODELS)
-        row("model", self._stt_model)
-        hint("stt_model_hint")
-        self._lang = popup(LANGS)
-        row("language", self._lang)
-        hint("stt_lang_hint")
+        self._build_stt(b)
 
         # ---- Voice (TTS) tab ----
-        add_tab("tab_voice")
-        header("voice_header")
-        self._tts_enabled = checkbox("tts_enabled")
-        self._tts_enabled.setTarget_(self)
-        self._tts_enabled.setAction_("ttsEnabledChanged:")
-        stack[0].addArrangedSubview_(self._tts_enabled)
-        self._tts_voice = popup(self._voice_labels())
-        self._tts_voice.setTarget_(self)
-        self._tts_voice.setAction_("ttsVoiceChanged:")  # play a sample on change
-        row("voice", self._tts_voice)
-        self._prem = button("premium", "downloadPremium:", 290)
-        row("", self._prem)
-        # read-aloud trigger: keyboard row + mouse row, each with an on/off checkbox
-        stack[0].addArrangedSubview_(label(T("tts_button"), bold=True))
-        self._tts_kb = field(w=170)
-        self._cap_tts_kb = button("catch", "captureTtsKb:", 100)
-        self._tts_kb_on = trig_row("trig_kb", self._tts_kb, self._cap_tts_kb)
-        self._tts_ms = popup(self._mouse_labels(), w=200)
-        self._tts_ms_map = [(k, key) for k, key, _ in MOUSE_BUTTONS]
-        self._cap_tts_ms = button("catch", "captureTtsMs:", 90)
-        self._tts_ms_on = trig_row("trig_mouse", self._tts_ms, self._cap_tts_ms)
-        hint("trig_check_hint")
+        self._build_voice(b)
 
         # ---- Triggers tab ----
-        add_tab("tab_triggers")
-        header("trig_header")
-        self._wheel_kb = field(w=170)
-        self._cap_wheel_kb = button("catch", "captureWheelKb:", 100)
-        self._wheel_kb_on = trig_row("trig_kb", self._wheel_kb, self._cap_wheel_kb)
-        self._wheel_ms = popup(self._mouse_labels(), w=200)
-        self._wheel_ms_map = [(k, key) for k, key, _ in MOUSE_BUTTONS]
-        self._cap_wheel_ms = button("catch", "captureWheelMs:", 90)
-        self._wheel_ms_on = trig_row("trig_mouse", self._wheel_ms, self._cap_wheel_ms)
-        hint("trig_hint")
-        hint("trig_check_hint")
-        header("misc_header")
-        self._concurrent = checkbox("concurrent")
-        stack[0].addArrangedSubview_(self._concurrent)
+        self._build_triggers(b)
 
         # ---- Language tab ----
-        add_tab("tab_lang")
-        header("lang_header")  # 🌐 Язык интерфейса — the dropdown sits right under it
-        self._uilang_popup = popup(["Русский", "English"], w=200)
-        self._uilang_popup.selectItemAtIndex_(0 if self._uilang == "ru" else 1)
-        stack[0].addArrangedSubview_(self._uilang_popup)
-        hint("lang_hint")
+        self._build_lang(b)
 
         # ---- Logs tab (read-only event feed; newest first, auto-refreshing) ----
-        add_tab("tab_logs")
-        header("logs_header")
-        hint("logs_hint")
-        clear_btn = NSButton.buttonWithTitle_target_action_(
-            T("logs_clear"), self, "clearLogs:"
-        )
-        clear_btn.setControlSize_(1)  # small
-        stack[0].addArrangedSubview_(clear_btn)
-        log_w, log_h = W - 64, H - 250
-        logs_scroll = NSScrollView.alloc().initWithFrame_(NSMakeRect(0, 0, log_w, log_h))
-        logs_scroll.setHasVerticalScroller_(True)
-        logs_scroll.setHasHorizontalScroller_(False)
-        logs_scroll.setAutohidesScrollers_(True)
-        logs_scroll.setBorderType_(2)  # NSBezelBorder — a framed box around the feed
-        logs_scroll.setDrawsBackground_(False)
-        logs_scroll.setTranslatesAutoresizingMaskIntoConstraints_(False)
-        tv = NSTextView.alloc().initWithFrame_(NSMakeRect(0, 0, log_w, log_h))
-        tv.setEditable_(False)
-        tv.setSelectable_(True)            # so the user can copy a line out
-        tv.setRichText_(False)
-        tv.setDrawsBackground_(False)
-        tv.setFont_(NSFont.monospacedSystemFontOfSize_weight_(11, 0))
-        tv.setTextColor_(NSColor.labelColor())
-        logs_scroll.setDocumentView_(tv)
-        logs_scroll.widthAnchor().constraintEqualToConstant_(log_w).setActive_(True)
-        logs_scroll.heightAnchor().constraintEqualToConstant_(log_h).setActive_(True)
-        stack[0].addArrangedSubview_(logs_scroll)
-        self._logs_view = tv
-        self._logs_timer = None
-        self._render_logs()
+        self._build_logs(b)
 
         # ---- always-visible restart banner, pinned to the TOP above the tabs so the
         #      user always knows which settings cost a restart. Fully static (same text
@@ -835,6 +641,270 @@ class SettingsWindow(NSObject):
         self._set_tooltips()
         self._capture_baseline()
         self._refresh_key_status()  # reflect any auth failures carried over in the log
+
+    # -- per-tab builders (each appends its tab via the shared _TabBuilder `b`) ----
+
+    @objc.python_method
+    def _build_lang(self, b):
+        b.add_tab("tab_lang")
+        b.header("lang_header")  # 🌐 Язык интерфейса — the dropdown sits right under it
+        self._uilang_popup = b.popup(["Русский", "English"], w=200)
+        self._uilang_popup.selectItemAtIndex_(0 if self._uilang == "ru" else 1)
+        b.cur.addArrangedSubview_(self._uilang_popup)
+        b.hint("lang_hint")
+
+    @objc.python_method
+    def _build_stt(self, b):
+        b.add_tab("tab_stt")
+        b.header("stt_header")
+        self._stt_backend = b.popup(STT_BACKENDS)
+        b.row("engine", self._stt_backend)
+        b.hint("stt_engine_hint")
+        self._stt_model = b.popup(STT_MODELS)
+        b.row("model", self._stt_model)
+        b.hint("stt_model_hint")
+        self._lang = b.popup(LANGS)
+        b.row("language", self._lang)
+        b.hint("stt_lang_hint")
+
+    @objc.python_method
+    def _build_triggers(self, b):
+        b.add_tab("tab_triggers")
+        b.header("trig_header")
+        self._wheel_kb = b.field(w=170)
+        self._cap_wheel_kb = b.button("catch", "captureWheelKb:", 100)
+        self._wheel_kb_on = b.trig_row("trig_kb", self._wheel_kb, self._cap_wheel_kb)
+        self._wheel_ms = b.popup(self._mouse_labels(), w=200)
+        self._wheel_ms_map = [(k, key) for k, key, _ in MOUSE_BUTTONS]
+        self._cap_wheel_ms = b.button("catch", "captureWheelMs:", 90)
+        self._wheel_ms_on = b.trig_row("trig_mouse", self._wheel_ms, self._cap_wheel_ms)
+        b.hint("trig_hint")
+        b.hint("trig_check_hint")
+        b.header("misc_header")
+        self._concurrent = b.checkbox("concurrent")
+        b.cur.addArrangedSubview_(self._concurrent)
+
+    @objc.python_method
+    def _build_voice(self, b):
+        b.add_tab("tab_voice")
+        b.header("voice_header")
+        self._tts_enabled = b.checkbox("tts_enabled")
+        self._tts_enabled.setTarget_(self)
+        self._tts_enabled.setAction_("ttsEnabledChanged:")
+        b.cur.addArrangedSubview_(self._tts_enabled)
+        self._tts_voice = b.popup(self._voice_labels())
+        self._tts_voice.setTarget_(self)
+        self._tts_voice.setAction_("ttsVoiceChanged:")  # play a sample on change
+        b.row("voice", self._tts_voice)
+        self._prem = b.button("premium", "downloadPremium:", 290)
+        b.row("", self._prem)
+        # read-aloud trigger: keyboard row + mouse row, each with an on/off checkbox
+        b.cur.addArrangedSubview_(b.label(self._t("tts_button"), bold=True))
+        self._tts_kb = b.field(w=170)
+        self._cap_tts_kb = b.button("catch", "captureTtsKb:", 100)
+        self._tts_kb_on = b.trig_row("trig_kb", self._tts_kb, self._cap_tts_kb)
+        self._tts_ms = b.popup(self._mouse_labels(), w=200)
+        self._tts_ms_map = [(k, key) for k, key, _ in MOUSE_BUTTONS]
+        self._cap_tts_ms = b.button("catch", "captureTtsMs:", 90)
+        self._tts_ms_on = b.trig_row("trig_mouse", self._tts_ms, self._cap_tts_ms)
+        b.hint("trig_check_hint")
+
+    @objc.python_method
+    def _build_logs(self, b):
+        b.add_tab("tab_logs")
+        b.header("logs_header")
+        b.hint("logs_hint")
+        clear_btn = NSButton.buttonWithTitle_target_action_(
+            self._t("logs_clear"), self, "clearLogs:"
+        )
+        clear_btn.setControlSize_(1)  # small
+        b.cur.addArrangedSubview_(clear_btn)
+        log_w, log_h = W - 64, H - 250
+        logs_scroll = NSScrollView.alloc().initWithFrame_(NSMakeRect(0, 0, log_w, log_h))
+        logs_scroll.setHasVerticalScroller_(True)
+        logs_scroll.setHasHorizontalScroller_(False)
+        logs_scroll.setAutohidesScrollers_(True)
+        logs_scroll.setBorderType_(2)  # NSBezelBorder — a framed box around the feed
+        logs_scroll.setDrawsBackground_(False)
+        logs_scroll.setTranslatesAutoresizingMaskIntoConstraints_(False)
+        tv = NSTextView.alloc().initWithFrame_(NSMakeRect(0, 0, log_w, log_h))
+        tv.setEditable_(False)
+        tv.setSelectable_(True)            # so the user can copy a line out
+        tv.setRichText_(False)
+        tv.setDrawsBackground_(False)
+        tv.setFont_(NSFont.monospacedSystemFontOfSize_weight_(11, 0))
+        tv.setTextColor_(NSColor.labelColor())
+        logs_scroll.setDocumentView_(tv)
+        logs_scroll.widthAnchor().constraintEqualToConstant_(log_w).setActive_(True)
+        logs_scroll.heightAnchor().constraintEqualToConstant_(log_h).setActive_(True)
+        b.cur.addArrangedSubview_(logs_scroll)
+        self._logs_view = tv
+        self._logs_timer = None
+        self._render_logs()
+
+    @objc.python_method
+    def _build_prompts(self, b):
+        # the wheel's sectors (count + folder access) + optional per-prompt model
+        # rules. Read FRESH from the folder so a just-added prompt shows here without
+        # a restart (the wheel itself applies new prompts on restart).
+        b.add_tab("tab_prompts", scroll=True)
+        self._sectors = list(load_sectors())
+        b.header("prompts_header")
+        self._prompts_label = b.label("", gray=True)
+        b.cur.addArrangedSubview_(self._prompts_label)
+        prompt_btns = NSStackView.alloc().init()
+        prompt_btns.setOrientation_(NSUserInterfaceLayoutOrientationHorizontal)
+        prompt_btns.setSpacing_(8)
+        prompt_btns.addArrangedSubview_(b.button("open_prompts_folder", "openPromptsFolder:", 230))
+        prompt_btns.addArrangedSubview_(b.button("refresh_prompts", "refreshPrompts:", 110))
+        b.cur.addArrangedSubview_(prompt_btns)
+        b.hint("prompts_hint")
+        self._refresh_prompts_label()
+        b.header("rules_header")
+        b.hint("rules_hint")
+        self._rules_stack = NSStackView.alloc().init()
+        self._rules_stack.setOrientation_(NSUserInterfaceLayoutOrientationVertical)
+        self._rules_stack.setAlignment_(NSLayoutAttributeLeading)
+        self._rules_stack.setSpacing_(6)
+        b.cur.addArrangedSubview_(self._rules_stack)
+        self._add_rule_btn = b.button("add_rule", "addRule:", 180)
+        b.cur.addArrangedSubview_(self._add_rule_btn)
+
+    @objc.python_method
+    def _build_models(self, b):
+        # one place to download & manage local Ollama models (live status + restart,
+        # installed list, pull). The LLM tab just picks.
+        b.add_tab("tab_models", scroll=True)
+        b.header("models_header")
+        self._ollama_state = None
+        self._ollama_status = b.label("", gray=True)
+        b.cur.addArrangedSubview_(self._ollama_status)
+        self._ollama_action = NSButton.buttonWithTitle_target_action_("", self, "ollamaAction:")
+        self._ollama_action.widthAnchor().constraintEqualToConstant_(200).setActive_(True)
+        self._ollama_action.setHidden_(True)  # only shown for Install/Start
+        st_btns = NSStackView.alloc().init()
+        st_btns.setOrientation_(NSUserInterfaceLayoutOrientationHorizontal)
+        st_btns.setSpacing_(8)
+        st_btns.addArrangedSubview_(self._ollama_action)
+        st_btns.addArrangedSubview_(b.button("ollama_restart_btn", "restartOllama:", 190))
+        st_btns.addArrangedSubview_(b.button("ollama_recheck_btn", "recheckOllama:", 110))
+        b.cur.addArrangedSubview_(st_btns)
+        b.cur.addArrangedSubview_(b.label(self._t("models_installed_header"), bold=True))
+        # A row per installed model — "• name (size)  [✕]" — so each can be deleted.
+        self._models_installed = NSStackView.alloc().init()
+        self._models_installed.setOrientation_(NSUserInterfaceLayoutOrientationVertical)
+        self._models_installed.setAlignment_(NSLayoutAttributeLeading)
+        self._models_installed.setSpacing_(4)
+        self._installed_rows = []
+        b.cur.addArrangedSubview_(self._models_installed)
+        b.cur.addArrangedSubview_(b.label(self._t("models_download_header"), bold=True))
+        self._models_pull = b.combo(OLLAMA_MODELS, w=220)
+        self._models_dl_btn = b.button("models_pull_btn", "downloadOllama:", 110)
+        dl_row = NSStackView.alloc().init()
+        dl_row.setOrientation_(NSUserInterfaceLayoutOrientationHorizontal)
+        dl_row.setSpacing_(8)
+        dl_row.addArrangedSubview_(self._models_pull)
+        dl_row.addArrangedSubview_(self._models_dl_btn)
+        b.cur.addArrangedSubview_(dl_row)
+        b.hint("models_download_hint")
+        b.cur.addArrangedSubview_(b.button("ollama_library_btn", "openOllamaLibrary:", 250))
+
+    @objc.python_method
+    def _build_keys(self, b):
+        # every secret in one place (each masked + eye reveal), stored in .env.
+        # The LLM tab / rules just pick a connection.
+        b.add_tab("tab_keys", scroll=True)
+        b.header("keys_header")
+        b.hint("keys_hint")
+        self._key_rows = []
+
+        def key_row(label_key, env_var):
+            secure = NSSecureTextField.alloc().initWithFrame_(NSMakeRect(0, 0, 320, 22))
+            secure.widthAnchor().constraintEqualToConstant_(320).setActive_(True)
+            plain = b.field(w=320)
+            plain.setHidden_(True)
+            secure.setDelegate_(self)
+            plain.setDelegate_(self)  # both -> controlTextDidChange_ -> dirty
+            # a momentary eye button (icon only): click reveals the key; it re-masks
+            # on tab switch / window close (see _mask_all_keys) — never a sticky checkbox
+            eye = NSButton.alloc().init()
+            eye.setBordered_(False)
+            eye.setTitle_("")
+            eimg = NSImage.imageWithSystemSymbolName_accessibilityDescription_("eye", self._t("show_key"))
+            eye.setImage_(eimg) if eimg is not None else eye.setTitle_("👁")
+            eye.setToolTip_(self._t("show_key"))
+            eye.setTarget_(self)
+            eye.setAction_("toggleKeyRow:")
+            eye.widthAnchor().constraintEqualToConstant_(28).setActive_(True)
+            # red «не работает» badge — hidden until a request fails auth (#14)
+            status = b.label("", gray=False)
+            status.setTextColor_(NSColor.systemRedColor())
+            status.setHidden_(True)
+            self._key_rows.append({
+                "env": env_var, "secure": secure, "plain": plain, "eye": eye, "status": status,
+            })
+            b.row(label_key, secure, plain, eye).addArrangedSubview_(status)
+
+        key_row("key_anthropic", "ANTHROPIC_API_KEY")
+        key_row("key_openai", "OPENAI_API_KEY")
+        key_row("key_ollama", "OLLAMA_API_KEY")
+
+    @objc.python_method
+    def _build_llm(self, b):
+        # base config + up to one rule per prompt (scrollable)
+        b.add_tab("tab_llm", scroll=True)
+        b.header("llm_header")
+        b.hint("llm_hint")
+
+        # Connection type: three radios; only the selected type's settings show (#36).
+        self._conn_radios = []
+        for tkey, lblkey in (("ollama", "conn_ollama"), ("cc", "conn_cc"), ("api", "conn_api")):
+            rb = NSButton.radioButtonWithTitle_target_action_(self._t(lblkey), self, "connTypeChanged:")
+            b.cur.addArrangedSubview_(rb)
+            self._conn_radios.append((rb, tkey))
+
+        # -- Direct API group: provider + model. The key lives on the «Ключи» tab. --
+        self._grp_api = b.group()
+        prev, b.cur = b.cur, self._grp_api
+        self._provider = b.popup(["Anthropic", "OpenAI"], w=160)
+        self._provider.setTarget_(self)
+        self._provider.setAction_("providerChanged:")
+        self._provider_row = b.row("provider", self._provider)
+        self._api_model = b.combo(ANTHROPIC_MODELS, w=250)  # provider switch updates the list
+        self._api_model_row = b.row("model", self._api_model)
+        # shown instead of provider/model when no provider has a key on the «Ключи» tab
+        self._api_no_key_btn = b.button("keys_redirect_btn", "openKeysTab:", 360)
+        self._api_no_key_btn.setHidden_(True)
+        b.cur.addArrangedSubview_(self._api_no_key_btn)
+        # (no «ключи на вкладке Ключи» hint here — the redirect button already says it,
+        #  and when a key is present the provider/model rows speak for themselves)
+        b.cur = prev
+
+        # -- Ollama group: pick the model + URL. Downloading, installed list and
+        #    status/restart live on the «Модели» tab (no duplicate controls here). --
+        self._grp_ollama = b.group()
+        prev, b.cur = b.cur, self._grp_ollama
+        # A pure selector of INSTALLED models (filled live from /api/tags) — no
+        # free-text. When nothing is installed, the popup is swapped for a button
+        # that jumps to the «Модели» tab. Download / manage models there.
+        self._ollama = b.popup([], w=200)
+        self._ollama_none_btn = b.button("ollama_no_models_btn", "openModelsTab:", 300)
+        self._ollama_none_btn.setHidden_(True)
+        b.row("model", self._ollama, self._ollama_none_btn)
+        self._ollama_url = b.field(w=250)
+        b.row("ollama_url", self._ollama_url)
+        b.hint("ollama_hint")
+        b.hint("keys_pointer")  # remote-Ollama token lives on the «Ключи» tab
+        b.hint("llm_models_pointer")
+        b.cur = prev
+
+        # -- Claude Code group: model --
+        self._grp_cc = b.group()
+        prev, b.cur = b.cur, self._grp_cc
+        self._cc_model = b.combo(CC_MODELS, w=250)
+        b.row("model", self._cc_model)
+        b.hint("cc_hint")
+        b.cur = prev
 
     @objc.python_method
     def _set_tooltips(self):
