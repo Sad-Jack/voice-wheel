@@ -43,6 +43,7 @@ from AppKit import (
     NSEventModifierFlagShift,
     NSEventTypeKeyDown,
     NSFont,
+    NSImage,
     NSLayoutAttributeCenterY,
     NSLayoutAttributeLeading,
     NSLayoutConstraint,
@@ -275,6 +276,7 @@ class SettingsWindow(NSObject):
         # NSTabView auto-focuses the new tab's first text field; drop it so the caret
         # doesn't land in an input (e.g. «Скачать модель») just from switching tabs.
         self.performSelector_withObject_afterDelay_("clearFocus:", None, 0.0)
+        self._mask_all_keys()  # revealed keys are only shown while ON the Keys tab
 
     def clearFocus_(self, _arg):  # noqa: N802
         if self._window is not None:
@@ -564,9 +566,19 @@ class SettingsWindow(NSObject):
             plain.setHidden_(True)
             secure.setDelegate_(self)
             plain.setDelegate_(self)  # both -> controlTextDidChange_ -> dirty
-            show = NSButton.checkboxWithTitle_target_action_(T("show_key"), self, "toggleKeyRow:")
-            self._key_rows.append({"env": env_var, "secure": secure, "plain": plain, "show": show})
-            row(label_key, secure, plain, show)
+            # a momentary eye button (icon only): click reveals the key; it re-masks
+            # on tab switch / window close (see _mask_all_keys) — never a sticky checkbox
+            eye = NSButton.alloc().init()
+            eye.setBordered_(False)
+            eye.setTitle_("")
+            eimg = NSImage.imageWithSystemSymbolName_accessibilityDescription_("eye", T("show_key"))
+            eye.setImage_(eimg) if eimg is not None else eye.setTitle_("👁")
+            eye.setToolTip_(T("show_key"))
+            eye.setTarget_(self)
+            eye.setAction_("toggleKeyRow:")
+            eye.widthAnchor().constraintEqualToConstant_(28).setActive_(True)
+            self._key_rows.append({"env": env_var, "secure": secure, "plain": plain, "eye": eye})
+            row(label_key, secure, plain, eye)
 
         key_row("key_anthropic", "ANTHROPIC_API_KEY")
         key_row("key_openai", "OPENAI_API_KEY")
@@ -933,9 +945,7 @@ class SettingsWindow(NSObject):
         env = self._read_env()  # load every key/token from .env into the Keys tab
         for e in self._key_rows:
             self._set_key(e, env.get(e["env"], ""))
-            e["show"].setState_(0)
-            e["secure"].setHidden_(False)
-            e["plain"].setHidden_(True)
+            self._set_key_revealed(e, False)  # always masked on (re)open
         self._apply_conn_visibility()
         self._refresh_api_availability()  # offer only providers whose key is set
         self._start_ollama_check()  # populate the Models tab (status + installed list) on open
@@ -1191,22 +1201,25 @@ class SettingsWindow(NSObject):
 
     @objc.python_method
     def _refresh_api_availability(self):
-        """Direct-API group: offer only providers with a key; if none, swap the
-        provider/model rows for a button that jumps to the «Ключи» tab."""
+        """Direct-API group: the provider dropdown lists ONLY providers whose key is
+        set on the «Ключи» tab; if none have a key, hide provider+model and show a
+        button that jumps to the «Ключи» tab."""
         avail = self._available_providers()
         self._api_no_key_btn.setHidden_(bool(avail))
         self._provider_row.setHidden_(not avail)
         self._api_model_row.setHidden_(not avail)
         if not avail:
             return
-        for i in range(self._provider.numberOfItems()):
-            self._provider.itemAtIndex_(i).setEnabled_(
-                str(self._provider.itemTitleAtIndex_(i)) in avail)
-        if str(self._provider.titleOfSelectedItem()) not in avail:
+        cur = str(self._provider.titleOfSelectedItem() or "")
+        self._provider.removeAllItems()
+        self._provider.addItemsWithTitles_(avail)  # only providers with a key
+        if cur not in avail:  # current provider lost its key -> fall back to an available one
             self._provider.selectItemWithTitle_(avail[0])
             self._last_provider = avail[0]
             self._refresh_api_models()
             self._api_model.setStringValue_(self._provider_models()[0])
+        else:
+            self._provider.selectItemWithTitle_(cur)
 
     @objc.python_method
     def _set_rule_engine_availability(self, engine_popup):
@@ -1222,10 +1235,13 @@ class SettingsWindow(NSObject):
         self._tabs.selectTabViewItemWithIdentifier_("tab_keys")
 
     def toggleKeyRow_(self, sender):  # noqa: N802
-        e = next((e for e in self._key_rows if e["show"] == sender), None)
-        if e is None:
-            return
-        if bool(sender.state()):  # reveal
+        e = next((e for e in self._key_rows if e["eye"] == sender), None)
+        if e is not None:
+            self._set_key_revealed(e, e["plain"].isHidden())  # masked now -> reveal
+
+    @objc.python_method
+    def _set_key_revealed(self, e, revealed):
+        if revealed:  # show the plain mirror
             e["plain"].setStringValue_(str(e["secure"].stringValue()))
             e["secure"].setHidden_(True)
             e["plain"].setHidden_(False)
@@ -1233,6 +1249,18 @@ class SettingsWindow(NSObject):
             e["secure"].setStringValue_(str(e["plain"].stringValue()))
             e["plain"].setHidden_(True)
             e["secure"].setHidden_(False)
+        img = NSImage.imageWithSystemSymbolName_accessibilityDescription_(
+            "eye.slash" if revealed else "eye", "")
+        if img is not None:
+            e["eye"].setImage_(img)
+
+    @objc.python_method
+    def _mask_all_keys(self):
+        """Re-mask every revealed key (called when leaving the Keys tab / on load),
+        so a token is only visible while you're actively on the Keys tab."""
+        for e in getattr(self, "_key_rows", []):
+            if not e["plain"].isHidden():
+                self._set_key_revealed(e, False)
 
     # -- Ollama model download (#39) ------------------------------------------
 
