@@ -228,6 +228,154 @@ _BACKEND_TO_KEY = {
 }
 
 
+class _TabBuilder:
+    """The UI-construction primitives for the settings tabs, lifted out of the
+    `SettingsWindow._build` mega-method so each tab can be built by its own method.
+
+    Plain Python on purpose (NOT an NSObject): it defines no selectors and is never
+    a target/delegate, so there is no ObjC selector-registration hazard — every
+    control it makes is wired to `window` (the SettingsWindow), whose selectors do
+    the work. `cur` is the current vertical container; it reads/writes a shared
+    1-element `stack` list so `_build` and the builder always agree on it."""
+
+    def __init__(self, window, tabs, stack):
+        self.window = window
+        self.tabs = tabs
+        self._stack = stack  # 1-element list shared with _build
+
+    @property
+    def cur(self):
+        return self._stack[0]
+
+    @cur.setter
+    def cur(self, value):
+        self._stack[0] = value
+
+    def _t(self, key):
+        return self.window._t(key)  # live: follows the window's current language
+
+    def add_tab(self, key, scroll=False):
+        tab_w, tab_h = W - 28, H - 138  # tracks the tabs frame height (− tab bar/insets)
+        v = NSStackView.alloc().init()
+        v.setOrientation_(NSUserInterfaceLayoutOrientationVertical)
+        v.setAlignment_(NSLayoutAttributeLeading)
+        v.setSpacing_(8)
+        v.setTranslatesAutoresizingMaskIntoConstraints_(False)
+        doc = _FlippedView.alloc().initWithFrame_(NSMakeRect(0, 0, tab_w, tab_h))
+        doc.addSubview_(v)
+        cons = [
+            v.topAnchor().constraintEqualToAnchor_constant_(doc.topAnchor(), 16),
+            v.leadingAnchor().constraintEqualToAnchor_constant_(doc.leadingAnchor(), 18),
+        ]
+        if scroll:
+            # The document view grows with its content; the scroll view shows a
+            # vertical scroller only when it overflows the tab (autohide).
+            doc.setTranslatesAutoresizingMaskIntoConstraints_(False)
+            sv = NSScrollView.alloc().initWithFrame_(NSMakeRect(0, 0, tab_w, tab_h))
+            sv.setHasVerticalScroller_(True)
+            sv.setHasHorizontalScroller_(False)
+            sv.setDrawsBackground_(False)
+            sv.setAutohidesScrollers_(True)
+            sv.setDocumentView_(doc)
+            cons += [
+                doc.widthAnchor().constraintEqualToAnchor_(sv.contentView().widthAnchor()),
+                doc.bottomAnchor().constraintEqualToAnchor_constant_(v.bottomAnchor(), 16),
+            ]
+            view = sv
+        else:
+            view = doc
+        NSLayoutConstraint.activateConstraints_(cons)
+        item = NSTabViewItem.alloc().initWithIdentifier_(key)
+        item.setLabel_(self._t(key))
+        item.setView_(view)
+        self.tabs.addTabViewItem_(item)
+        self.cur = v
+
+    def label(self, s, bold=False, gray=False, width=None):
+        f = NSTextField.labelWithString_(s)
+        f.setFont_(NSFont.boldSystemFontOfSize_(13) if bold else NSFont.systemFontOfSize_(11 if gray else 12))
+        if gray:
+            f.setTextColor_(NSColor.secondaryLabelColor())
+        if width is not None:
+            f.widthAnchor().constraintEqualToConstant_(width).setActive_(True)
+        return f
+
+    def header(self, key):
+        self.cur.addArrangedSubview_(self.label(self._t(key), bold=True))
+
+    def hint(self, key):
+        # Wrap long explanatory text within the tab instead of letting the
+        # single-line label run off the right edge (container W-28, leading 18).
+        wrap_w = W - 68
+        lab = self.label(self._t(key), gray=True)
+        lab.setUsesSingleLineMode_(False)
+        lab.setLineBreakMode_(NSLineBreakByWordWrapping)
+        lab.setMaximumNumberOfLines_(0)
+        lab.setPreferredMaxLayoutWidth_(wrap_w)
+        lab.widthAnchor().constraintLessThanOrEqualToConstant_(wrap_w).setActive_(True)
+        self.cur.addArrangedSubview_(lab)
+
+    def row(self, label_key, *controls):
+        h = NSStackView.alloc().init()
+        h.setOrientation_(NSUserInterfaceLayoutOrientationHorizontal)
+        h.setAlignment_(NSLayoutAttributeCenterY)
+        h.setSpacing_(8)
+        h.addArrangedSubview_(self.label(self._t(label_key) if label_key else "", width=150))
+        for c in controls:
+            h.addArrangedSubview_(c)
+        self.cur.addArrangedSubview_(h)
+        return h
+
+    def popup(self, items, w=300):
+        p = NSPopUpButton.alloc().initWithFrame_pullsDown_(NSMakeRect(0, 0, w, 26), False)
+        p.addItemsWithTitles_(items)
+        p.widthAnchor().constraintEqualToConstant_(w).setActive_(True)
+        return p
+
+    def field(self, w=300):
+        t = NSTextField.alloc().initWithFrame_(NSMakeRect(0, 0, w, 22))
+        t.widthAnchor().constraintEqualToConstant_(w).setActive_(True)
+        return t
+
+    def combo(self, items, w=300):
+        # editable: pick a recommendation from the dropdown, or type a custom one
+        c = NSComboBox.alloc().initWithFrame_(NSMakeRect(0, 0, w, 26))
+        c.addItemsWithObjectValues_(items)
+        c.setCompletes_(True)
+        c.widthAnchor().constraintEqualToConstant_(w).setActive_(True)
+        return c
+
+    def checkbox(self, key):
+        return NSButton.checkboxWithTitle_target_action_(self._t(key), None, None)
+
+    def button(self, key, action, w):
+        b = NSButton.buttonWithTitle_target_action_(self._t(key), self.window, action)
+        b.widthAnchor().constraintEqualToConstant_(w).setActive_(True)
+        return b
+
+    def trig_row(self, key, *controls):
+        # a trigger row whose label is an on/off checkbox; off = row locked
+        cb = NSButton.checkboxWithTitle_target_action_(self._t(key), self.window, "triggerToggled:")
+        cb.widthAnchor().constraintEqualToConstant_(150).setActive_(True)
+        h = NSStackView.alloc().init()
+        h.setOrientation_(NSUserInterfaceLayoutOrientationHorizontal)
+        h.setAlignment_(NSLayoutAttributeCenterY)
+        h.setSpacing_(8)
+        h.addArrangedSubview_(cb)
+        for c in controls:
+            h.addArrangedSubview_(c)
+        self.cur.addArrangedSubview_(h)
+        return cb
+
+    def group(self):
+        g = NSStackView.alloc().init()
+        g.setOrientation_(NSUserInterfaceLayoutOrientationVertical)
+        g.setAlignment_(NSLayoutAttributeLeading)
+        g.setSpacing_(6)
+        self.cur.addArrangedSubview_(g)
+        return g
+
+
 class SettingsWindow(NSObject):
     def init(self):
         self = objc.super(SettingsWindow, self).init()
@@ -399,8 +547,7 @@ class SettingsWindow(NSObject):
             return
         self._uilang = resolve_lang(self._read().get("ui_language"))
 
-        def T(key):
-            return _tr(key, self._uilang)
+        T = self._t  # this window's live translator
 
         win = NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
             NSMakeRect(0, 0, W, H),
@@ -423,118 +570,22 @@ class SettingsWindow(NSObject):
 
         stack = [None]   # the current tab's vertical NSStackView (Auto-Layout, auto-aligns)
 
-        def add_tab(key, scroll=False):
-            tab_w, tab_h = W - 28, H - 138  # tracks the tabs frame height (− tab bar/insets)
-            v = NSStackView.alloc().init()
-            v.setOrientation_(NSUserInterfaceLayoutOrientationVertical)
-            v.setAlignment_(NSLayoutAttributeLeading)
-            v.setSpacing_(8)
-            v.setTranslatesAutoresizingMaskIntoConstraints_(False)
-            doc = _FlippedView.alloc().initWithFrame_(NSMakeRect(0, 0, tab_w, tab_h))
-            doc.addSubview_(v)
-            cons = [
-                v.topAnchor().constraintEqualToAnchor_constant_(doc.topAnchor(), 16),
-                v.leadingAnchor().constraintEqualToAnchor_constant_(doc.leadingAnchor(), 18),
-            ]
-            if scroll:
-                # The document view grows with its content; the scroll view shows a
-                # vertical scroller only when it overflows the tab (autohide).
-                doc.setTranslatesAutoresizingMaskIntoConstraints_(False)
-                sv = NSScrollView.alloc().initWithFrame_(NSMakeRect(0, 0, tab_w, tab_h))
-                sv.setHasVerticalScroller_(True)
-                sv.setHasHorizontalScroller_(False)
-                sv.setDrawsBackground_(False)
-                sv.setAutohidesScrollers_(True)
-                sv.setDocumentView_(doc)
-                cons += [
-                    doc.widthAnchor().constraintEqualToAnchor_(sv.contentView().widthAnchor()),
-                    doc.bottomAnchor().constraintEqualToAnchor_constant_(v.bottomAnchor(), 16),
-                ]
-                view = sv
-            else:
-                view = doc
-            NSLayoutConstraint.activateConstraints_(cons)
-            item = NSTabViewItem.alloc().initWithIdentifier_(key)
-            item.setLabel_(T(key))
-            item.setView_(view)
-            tabs.addTabViewItem_(item)
-            stack[0] = v
+        b = _TabBuilder(self, tabs, stack)
+        add_tab = b.add_tab
 
-        def label(s, bold=False, gray=False, width=None):
-            f = NSTextField.labelWithString_(s)
-            f.setFont_(NSFont.boldSystemFontOfSize_(13) if bold else NSFont.systemFontOfSize_(11 if gray else 12))
-            if gray:
-                f.setTextColor_(NSColor.secondaryLabelColor())
-            if width is not None:
-                f.widthAnchor().constraintEqualToConstant_(width).setActive_(True)
-            return f
+        label = b.label
+        header = b.header
+        hint = b.hint
 
-        def header(key):
-            stack[0].addArrangedSubview_(label(T(key), bold=True))
+        row = b.row
+        popup = b.popup
+        field = b.field
+        combo = b.combo
+        checkbox = b.checkbox
+        button = b.button
 
-        def hint(key):
-            # Wrap long explanatory text within the tab instead of letting the
-            # single-line label run off the right edge (container W-28, leading 18).
-            wrap_w = W - 68
-            lab = label(T(key), gray=True)
-            lab.setUsesSingleLineMode_(False)
-            lab.setLineBreakMode_(NSLineBreakByWordWrapping)
-            lab.setMaximumNumberOfLines_(0)
-            lab.setPreferredMaxLayoutWidth_(wrap_w)
-            lab.widthAnchor().constraintLessThanOrEqualToConstant_(wrap_w).setActive_(True)
-            stack[0].addArrangedSubview_(lab)
-
-        def row(label_key, *controls):
-            h = NSStackView.alloc().init()
-            h.setOrientation_(NSUserInterfaceLayoutOrientationHorizontal)
-            h.setAlignment_(NSLayoutAttributeCenterY)
-            h.setSpacing_(8)
-            h.addArrangedSubview_(label(T(label_key) if label_key else "", width=150))
-            for c in controls:
-                h.addArrangedSubview_(c)
-            stack[0].addArrangedSubview_(h)
-            return h
-
-        def popup(items, w=300):
-            p = NSPopUpButton.alloc().initWithFrame_pullsDown_(NSMakeRect(0, 0, w, 26), False)
-            p.addItemsWithTitles_(items)
-            p.widthAnchor().constraintEqualToConstant_(w).setActive_(True)
-            return p
-
-        def field(w=300):
-            t = NSTextField.alloc().initWithFrame_(NSMakeRect(0, 0, w, 22))
-            t.widthAnchor().constraintEqualToConstant_(w).setActive_(True)
-            return t
-
-        def combo(items, w=300):
-            # editable: pick a recommendation from the dropdown, or type a custom one
-            c = NSComboBox.alloc().initWithFrame_(NSMakeRect(0, 0, w, 26))
-            c.addItemsWithObjectValues_(items)
-            c.setCompletes_(True)
-            c.widthAnchor().constraintEqualToConstant_(w).setActive_(True)
-            return c
-
-        def checkbox(key):
-            return NSButton.checkboxWithTitle_target_action_(T(key), None, None)
-
-        def button(key, action, w):
-            b = NSButton.buttonWithTitle_target_action_(T(key), self, action)
-            b.widthAnchor().constraintEqualToConstant_(w).setActive_(True)
-            return b
-
-        def trig_row(key, *controls):
-            # a trigger row whose label is an on/off checkbox; off = row locked
-            cb = NSButton.checkboxWithTitle_target_action_(T(key), self, "triggerToggled:")
-            cb.widthAnchor().constraintEqualToConstant_(150).setActive_(True)
-            h = NSStackView.alloc().init()
-            h.setOrientation_(NSUserInterfaceLayoutOrientationHorizontal)
-            h.setAlignment_(NSLayoutAttributeCenterY)
-            h.setSpacing_(8)
-            h.addArrangedSubview_(cb)
-            for c in controls:
-                h.addArrangedSubview_(c)
-            stack[0].addArrangedSubview_(h)
-            return cb
+        trig_row = b.trig_row
+        group = b.group
 
         # ---- LLM tab (scrollable: base config + up to one rule per prompt) ----
         add_tab("tab_llm", scroll=True)
@@ -547,14 +598,6 @@ class SettingsWindow(NSObject):
             rb = NSButton.radioButtonWithTitle_target_action_(T(lblkey), self, "connTypeChanged:")
             stack[0].addArrangedSubview_(rb)
             self._conn_radios.append((rb, tkey))
-
-        def group():
-            g = NSStackView.alloc().init()
-            g.setOrientation_(NSUserInterfaceLayoutOrientationVertical)
-            g.setAlignment_(NSLayoutAttributeLeading)
-            g.setSpacing_(6)
-            stack[0].addArrangedSubview_(g)
-            return g
 
         # -- Direct API group: provider + model. The key lives on the «Ключи» tab. --
         self._grp_api = group()
