@@ -744,17 +744,7 @@ class SettingsWindow(NSObject):
         key_row("key_ollama", "OLLAMA_API_KEY")
 
         # ---- Speech (STT) tab ----
-        add_tab("tab_stt")
-        header("stt_header")
-        self._stt_backend = popup(STT_BACKENDS)
-        row("engine", self._stt_backend)
-        hint("stt_engine_hint")
-        self._stt_model = popup(STT_MODELS)
-        row("model", self._stt_model)
-        hint("stt_model_hint")
-        self._lang = popup(LANGS)
-        row("language", self._lang)
-        hint("stt_lang_hint")
+        self._build_stt(b)
 
         # ---- Voice (TTS) tab ----
         add_tab("tab_voice")
@@ -884,6 +874,20 @@ class SettingsWindow(NSObject):
         self._uilang_popup.selectItemAtIndex_(0 if self._uilang == "ru" else 1)
         b.cur.addArrangedSubview_(self._uilang_popup)
         b.hint("lang_hint")
+
+    @objc.python_method
+    def _build_stt(self, b):
+        b.add_tab("tab_stt")
+        b.header("stt_header")
+        self._stt_backend = b.popup(STT_BACKENDS)
+        b.row("engine", self._stt_backend)
+        b.hint("stt_engine_hint")
+        self._stt_model = b.popup(STT_MODELS)
+        b.row("model", self._stt_model)
+        b.hint("stt_model_hint")
+        self._lang = b.popup(LANGS)
+        b.row("language", self._lang)
+        b.hint("stt_lang_hint")
 
     @objc.python_method
     def _set_tooltips(self):
