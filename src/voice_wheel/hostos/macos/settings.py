@@ -466,6 +466,11 @@ class SettingsWindow(NSObject):
         self._ollama_url = field(w=250)
         row("ollama_url", self._ollama_url)
         hint("ollama_hint")
+        # optional bearer token for a remote/hosted Ollama behind auth (kept in .env)
+        self._ollama_token = NSSecureTextField.alloc().initWithFrame_(NSMakeRect(0, 0, 250, 22))
+        self._ollama_token.widthAnchor().constraintEqualToConstant_(250).setActive_(True)
+        row("ollama_token", self._ollama_token)
+        hint("ollama_token_hint")
         hint("llm_models_pointer")
         stack[0] = prev
 
@@ -705,7 +710,7 @@ class SettingsWindow(NSObject):
             p.setAction_("markDirty:")
         self._concurrent.setTarget_(self)
         self._concurrent.setAction_("markDirty:")
-        for f in (self._api_key, self._api_key_plain, self._api_model,
+        for f in (self._api_key, self._api_key_plain, self._api_model, self._ollama_token,
                   self._ollama_url, self._cc_model, self._wheel_kb, self._tts_kb):
             f.setDelegate_(self)  # controlTextDidChange_ fires per keystroke
 
@@ -891,6 +896,7 @@ class SettingsWindow(NSObject):
         self._ollama_model_value = str(llm.get("ollama_model", "qwen2.5:7b"))
         self._refresh_ollama_model_popup()  # shows the saved model now; the live check adds the rest
         self._ollama_url.setStringValue_(str(llm.get("ollama_url", "http://localhost:11434")))
+        self._ollama_token.setStringValue_(self._read_env().get("OLLAMA_API_KEY", ""))
         self._set_api_key(self._read_env().get(self._provider_env_var(), ""))
         self._api_show.setState_(0)
         self._api_key.setHidden_(False)
@@ -940,6 +946,8 @@ class SettingsWindow(NSObject):
         else:  # Claude Code
             data["llm"]["backend"] = "claude_warm"
             data["llm"]["model"] = str(self._cc_model.stringValue()).strip()
+        # optional Ollama bearer token (remote/hosted auth) -> .env, applies at once
+        self._write_env_key("OLLAMA_API_KEY", str(self._ollama_token.stringValue()).strip())
         data.setdefault("stt", {})
         data["stt"]["backend"] = str(self._stt_backend.titleOfSelectedItem())
         data["stt"]["model"] = str(self._stt_model.titleOfSelectedItem())
@@ -1122,17 +1130,27 @@ class SettingsWindow(NSObject):
 
     # -- Ollama model download (#39) ------------------------------------------
 
+    @staticmethod
+    def _bearer(token):
+        token = (token or "").strip()
+        return {"Authorization": f"Bearer {token}"} if token else {}
+
+    @objc.python_method
+    def _ollama_token_value(self):
+        return str(self._ollama_token.stringValue()).strip()
+
     def downloadOllama_(self, _sender):  # noqa: N802
         model = str(self._models_pull.stringValue()).strip()
         if not model:
             return
         url = str(self._ollama_url.stringValue()).strip() or "http://localhost:11434"
+        token = self._ollama_token_value()
         self._models_dl_btn.setEnabled_(False)
         self._note.setStringValue_(self._t("models_downloading").format(model))
-        threading.Thread(target=self._pull_ollama, args=(model, url), daemon=True).start()
+        threading.Thread(target=self._pull_ollama, args=(model, url, token), daemon=True).start()
 
     @objc.python_method
-    def _pull_ollama(self, model, url):
+    def _pull_ollama(self, model, url, token):
         """Stream the pull from Ollama's /api/pull so we can show live % progress.
         Each JSON line carries total/completed bytes; we push the percent to the note
         on the main thread, throttled to whole-percent changes."""
@@ -1141,7 +1159,7 @@ class SettingsWindow(NSObject):
         ok, error, last_pct = False, False, -1
         try:
             with requests.post(f"{url}/api/pull", json={"model": model, "stream": True},
-                               stream=True, timeout=(5, 1800)) as r:
+                               stream=True, timeout=(5, 1800), headers=self._bearer(token)) as r:
                 r.raise_for_status()
                 for raw in r.iter_lines():
                     if not raw:
@@ -1201,26 +1219,29 @@ class SettingsWindow(NSObject):
         self._ollama_status.setTextColor_(NSColor.secondaryLabelColor())
         self._set_installed_message(self._t("models_installed_loading"))
         url = str(self._ollama_url.stringValue()).strip() or "http://localhost:11434"
-        threading.Thread(target=self._check_ollama, args=(url,), daemon=True).start()
+        token = self._ollama_token_value()
+        threading.Thread(target=self._check_ollama, args=(url, token), daemon=True).start()
 
     @objc.python_method
-    def _check_ollama(self, url):
+    def _check_ollama(self, url, token):
         import os
         import shutil
 
         installed = shutil.which("ollama") is not None or any(
             os.path.exists(p) for p in ("/usr/local/bin/ollama", "/opt/homebrew/bin/ollama")
         )
+        headers = self._bearer(token)
         running, version, models = False, "", []
         try:
             import requests
 
-            tags = requests.get(f"{url}/api/tags", timeout=1.5)
+            tags = requests.get(f"{url}/api/tags", timeout=1.5, headers=headers)
             running = True
             models = [(str(m.get("name", "")), int(m.get("size", 0)))
                       for m in (tags.json().get("models") or [])]
             try:
-                version = str(requests.get(f"{url}/api/version", timeout=1.5).json().get("version", ""))
+                version = str(requests.get(f"{url}/api/version", timeout=1.5,
+                                           headers=headers).json().get("version", ""))
             except Exception:  # noqa: BLE001 - version is a nice-to-have
                 version = ""
         except Exception:  # noqa: BLE001 - any failure = not reachable
@@ -1473,7 +1494,7 @@ class SettingsWindow(NSObject):
             return (self._selected_conn_type(), str(self._provider.titleOfSelectedItem()),
                     self._api_key_value(), str(self._api_model.stringValue()),
                     str(self._ollama.titleOfSelectedItem() or ""), str(self._ollama_url.stringValue()),
-                    str(self._cc_model.stringValue()), rules)
+                    str(self._ollama_token.stringValue()), str(self._cc_model.stringValue()), rules)
         if ident == "tab_stt":
             return (str(self._stt_backend.titleOfSelectedItem()),
                     str(self._stt_model.titleOfSelectedItem()),
