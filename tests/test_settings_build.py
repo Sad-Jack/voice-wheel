@@ -35,7 +35,7 @@ WIDGET_ATTRS = [
     "_ollama", "_ollama_none_btn", "_ollama_url", "_cc_model",
     "_ollama_status", "_ollama_action",
     "_models_installed", "_models_pull", "_models_dl_btn",
-    "_prompts_label", "_rules_stack", "_add_rule_btn",
+    "_prompts_label", "_rules_stack",
     "_stt_backend", "_stt_model", "_lang",
     "_tts_enabled", "_tts_voice", "_prem",
     "_tts_kb", "_cap_tts_kb", "_tts_kb_on", "_tts_ms", "_cap_tts_ms", "_tts_ms_on",
@@ -163,14 +163,42 @@ def test_safe_ui_handlers_do_not_throw():
     w.clearLogs_(None)
     for sel in ("resetLlm_", "resetStt_", "resetVoice_", "resetTriggers_", "resetLang_"):
         getattr(w, sel)(None)
-    # add a rule then delete it via its ✕ button
-    before = len(w._rules)
-    w.addRule_(None)
-    if w._rules and len(w._rules) > before:
-        w.deleteRule_(w._rules[-1]["delete"])
-    assert len(w._rules) == before
+    # exercise a prompt row: expand, switch connection to API, switch provider
+    if w._rules:
+        r = w._rules[0]
+        w.ruleToggle_(r["disclosure"])
+        api_radio = next(rb for rb, t in r["radios"] if t == "api")
+        w.ruleConnChanged_(api_radio)
+        w.ruleProviderChanged_(r["provider"])
     # reveal then the eye toggle path
     w.toggleKeyRow_(w._key_rows[0]["eye"])
+
+
+# ---- per-prompt connection rows (the new Prompts-tab design) --------------
+
+def test_one_collapsible_row_per_prompt():
+    w = _window()
+    assert len(w._rules) == len(w._sectors)
+    assert {r["sector_key"] for r in w._rules} == {s.key for s in w._sectors}
+
+
+def test_prompt_rows_default_to_base_and_show_inherit():
+    w = _window()
+    for r in w._rules:
+        assert w._prompt_row_backend(r) == w._current_backend()  # defaults to base
+        s = str(r["summary"].stringValue())
+        assert "как базовая" in s or "as base" in s  # inherit summary, not an override
+
+
+def test_changing_a_row_model_makes_it_an_override():
+    w = _window()
+    r = w._rules[0]
+    r["model"].setStringValue_("some-other-model")  # differs from base
+    w._update_rule_summary(r)
+    assert "→" in str(r["summary"].stringValue())  # override arrow, not "inherit"
+    # the tab_llm snapshot (which drives Save) ends with the per-prompt rules tuple
+    snap = w._tab_snapshot("tab_llm")
+    assert any("some-other-model" in str(x) for x in snap[-1])
 
 
 # ---- (h) build is idempotent (the _window guard) --------------------------

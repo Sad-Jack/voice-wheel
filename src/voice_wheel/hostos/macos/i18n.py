@@ -147,12 +147,14 @@ STR = {
         "Список промптов обновлён. Колесо обновится после перезапуска приложения.",
         "Prompt list refreshed. The wheel updates after an app restart.",
     ),
-    "rules_header": ("🎛 Модель на промпт — правила (опц.)", "🎛 Per-prompt model — rules (opt.)"),
+    "rules_header": ("🎛 Модель на каждый промпт", "🎛 Model per prompt"),
     "rules_hint": (
-        "Базовая (выше) — для всех промптов. Правило задаёт свою модель отдельному.",
-        "Base (above) applies to every prompt. A rule sets a separate model for one.",
+        "Каждый промпт по умолчанию использует базовую модель (вкладка LLM). Раскрой "
+        "промпт, чтобы задать ему свою модель; оставишь как базовую — будет наследовать её.",
+        "Every prompt uses the base model (LLM tab) by default. Expand a prompt to give "
+        "it its own model; leave it as base and it keeps inheriting the base.",
     ),
-    "add_rule": ("+ Добавить правило", "+ Add rule"),
+    "prompt_inherits_base": ("как базовая", "as base"),
     "reset_tab": ("Сброс", "Reset"),
     # Speech tab
     "stt_header": ("🎙 Распознавание (речь → текст)", "🎙 Recognition (speech → text)"),
