@@ -37,7 +37,7 @@ neural voice, offline. Press again to stop.
 ## Quick start
 
 Full, step-by-step instructions (incl. permissions and what auto-downloads) are
-in **[SETUP.md](SETUP.md)**. The short version:
+in **[SETUP.md](docs/SETUP.md)**. The short version:
 
 ```bash
 python3.12 -m venv ~/.venvs/voice-wheel-312
@@ -92,7 +92,7 @@ Choose in **Settings → Голос**:
 - **macOS** — system voices. For natural ones, use the "download premium voices" button (opens the system pane; Apple gives no API to fetch them silently).
 
 The design for the upcoming three-connection-type settings is in
-**[SETTINGS.md](SETTINGS.md)**.
+**[SETTINGS.md](docs/SETTINGS.md)**.
 
 ---
 
@@ -129,7 +129,7 @@ tests/                   core unit tests (pytest)
 ```
 
 `core/` never imports `hostos/`; `hostos/ → core`. See
-**[ARCHITECTURE.md](ARCHITECTURE.md)**.
+**[ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
 
 ---
 
@@ -140,13 +140,13 @@ tests/                   core unit tests (pytest)
 - **Raw text instead of processed (orange ping)** → LLM backend unreachable (start Ollama / pull the model / set the API key).
 - **Stuck spinner** → press the trigger again; a new press self-heals.
 
-More in **[SETUP.md](SETUP.md)**.
+More in **[SETUP.md](docs/SETUP.md)**.
 
 ---
 
 ## Docs
 
-- **[SETUP.md](SETUP.md)** — install & configure on a fresh Mac.
-- **[SETTINGS.md](SETTINGS.md)** — settings design (current + v2 vision).
-- **[FEATURES.md](FEATURES.md)** — feature tracker.
-- **[ARCHITECTURE.md](ARCHITECTURE.md)** — architecture & tech-debt log.
+- **[SETUP.md](docs/SETUP.md)** — install & configure on a fresh Mac.
+- **[SETTINGS.md](docs/SETTINGS.md)** — settings design (current + v2 vision).
+- **[FEATURES.md](docs/FEATURES.md)** — feature tracker.
+- **[ARCHITECTURE.md](docs/ARCHITECTURE.md)** — architecture & tech-debt log.

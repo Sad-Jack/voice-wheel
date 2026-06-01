@@ -137,5 +137,5 @@ text selected → it reads the selection aloud.
 - **No voice on ⌘4** → first run may still be downloading the voice (watch the console); or you're offline (it falls back to the macOS voice).
 - **`python -m venv` failed** → the path has a `:`/space; use `~/.venvs/voice-wheel-312` (see step 1).
 
-See [README.md](README.md) for usage and [SETTINGS.md](SETTINGS.md) for the
+See [README.md](../README.md) for usage and [SETTINGS.md](SETTINGS.md) for the
 settings design.
