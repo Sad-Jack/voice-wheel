@@ -456,30 +456,16 @@ class SettingsWindow(NSObject):
         hint("api_key_hint")
         stack[0] = prev
 
-        # -- Ollama group: model (with «Download») + URL --
+        # -- Ollama group: pick the model + URL. Downloading, installed list and
+        #    status/restart live on the «Модели» tab (no duplicate controls here). --
         self._grp_ollama = group()
         prev, stack[0] = stack[0], self._grp_ollama
         self._ollama = combo(OLLAMA_MODELS, w=190)
-        self._dl_ollama = button("download", "downloadOllama:", 100)
-        row("model", self._ollama, self._dl_ollama)
+        row("model", self._ollama)
         self._ollama_url = field()
         row("ollama_url", self._ollama_url)
         hint("ollama_hint")
-        # status (#40): checked in the background; shows installed/running + an action
-        self._ollama_state = None
-        self._ollama_status = label("", gray=True)
-        stack[0].addArrangedSubview_(self._ollama_status)
-        self._ollama_action = NSButton.buttonWithTitle_target_action_("", self, "ollamaAction:")
-        self._ollama_action.widthAnchor().constraintEqualToConstant_(200).setActive_(True)
-        # Hidden until a real action is needed (Установить/Запустить) — otherwise an
-        # empty-titled button would show as a mysterious grey box next to «Проверить».
-        self._ollama_action.setHidden_(True)
-        status_btns = NSStackView.alloc().init()
-        status_btns.setOrientation_(NSUserInterfaceLayoutOrientationHorizontal)
-        status_btns.setSpacing_(8)
-        status_btns.addArrangedSubview_(self._ollama_action)
-        status_btns.addArrangedSubview_(button("ollama_recheck_btn", "recheckOllama:", 120))
-        stack[0].addArrangedSubview_(status_btns)
+        hint("llm_models_pointer")
         stack[0] = prev
 
         # -- Claude Code group: model --
@@ -519,6 +505,42 @@ class SettingsWindow(NSObject):
         stack[0].addArrangedSubview_(self._rules_stack)
         self._add_rule_btn = button("add_rule", "addRule:", 180)
         stack[0].addArrangedSubview_(self._add_rule_btn)
+
+        # ---- Models tab: one place to download & manage local Ollama models
+        #      (live status + restart, installed list, pull). The LLM tab just picks.
+        add_tab("tab_models", scroll=True)
+        header("models_header")
+        self._ollama_state = None
+        self._ollama_status = label("", gray=True)
+        stack[0].addArrangedSubview_(self._ollama_status)
+        self._ollama_action = NSButton.buttonWithTitle_target_action_("", self, "ollamaAction:")
+        self._ollama_action.widthAnchor().constraintEqualToConstant_(200).setActive_(True)
+        self._ollama_action.setHidden_(True)  # only shown for Install/Start
+        st_btns = NSStackView.alloc().init()
+        st_btns.setOrientation_(NSUserInterfaceLayoutOrientationHorizontal)
+        st_btns.setSpacing_(8)
+        st_btns.addArrangedSubview_(self._ollama_action)
+        st_btns.addArrangedSubview_(button("ollama_restart_btn", "restartOllama:", 190))
+        st_btns.addArrangedSubview_(button("ollama_recheck_btn", "recheckOllama:", 110))
+        stack[0].addArrangedSubview_(st_btns)
+        stack[0].addArrangedSubview_(label(T("models_installed_header"), bold=True))
+        self._models_installed = label("", gray=True)
+        self._models_installed.setUsesSingleLineMode_(False)
+        self._models_installed.setLineBreakMode_(NSLineBreakByWordWrapping)
+        self._models_installed.setMaximumNumberOfLines_(0)
+        self._models_installed.setPreferredMaxLayoutWidth_(W - 68)
+        stack[0].addArrangedSubview_(self._models_installed)
+        stack[0].addArrangedSubview_(label(T("models_download_header"), bold=True))
+        self._models_pull = combo(OLLAMA_MODELS, w=220)
+        self._models_dl_btn = button("models_pull_btn", "downloadOllama:", 110)
+        dl_row = NSStackView.alloc().init()
+        dl_row.setOrientation_(NSUserInterfaceLayoutOrientationHorizontal)
+        dl_row.setSpacing_(8)
+        dl_row.addArrangedSubview_(self._models_pull)
+        dl_row.addArrangedSubview_(self._models_dl_btn)
+        stack[0].addArrangedSubview_(dl_row)
+        hint("models_download_hint")
+        stack[0].addArrangedSubview_(button("ollama_library_btn", "openOllamaLibrary:", 250))
 
         # ---- Speech (STT) tab ----
         add_tab("tab_stt")
@@ -629,7 +651,7 @@ class SettingsWindow(NSObject):
             (self._provider, "tip_provider"), (self._api_key, "tip_api_key"),
             (self._api_key_plain, "tip_api_key"),
             (self._api_model, "tip_model"), (self._ollama, "tip_model"),
-            (self._ollama_url, "tip_ollama_url"), (self._dl_ollama, "tip_download"),
+            (self._ollama_url, "tip_ollama_url"), (self._models_pull, "tip_model"),
             (self._cc_model, "tip_model"), (self._stt_backend, "tip_stt_backend"),
             (self._stt_model, "tip_stt_model"), (self._lang, "tip_stt_lang"),
             (self._tts_enabled, "tip_tts_enabled"), (self._tts_voice, "tip_tts_voice"),
@@ -874,8 +896,7 @@ class SettingsWindow(NSObject):
         self._api_key.setHidden_(False)
         self._api_key_plain.setHidden_(True)
         self._apply_conn_visibility()
-        if ctype == "ollama":
-            self._start_ollama_check()
+        self._start_ollama_check()  # populate the Models tab (status + installed list) on open
         stt = data.get("stt", {})
         self._stt_backend.selectItemWithTitle_(stt.get("backend", "auto"))
         self._stt_model.selectItemWithTitle_(str(stt.get("model", "small")))
@@ -1102,10 +1123,11 @@ class SettingsWindow(NSObject):
     # -- Ollama model download (#39) ------------------------------------------
 
     def downloadOllama_(self, _sender):  # noqa: N802
-        model = str(self._ollama.stringValue()).strip()
+        model = str(self._models_pull.stringValue()).strip()
         if not model:
             return
-        self._note.setStringValue_(self._t("note_ollama_pull").format(model))
+        self._models_dl_btn.setEnabled_(False)
+        self._note.setStringValue_(self._t("models_downloading").format(model))
         threading.Thread(target=self._pull_ollama, args=(model,), daemon=True).start()
 
     @objc.python_method
@@ -1127,26 +1149,29 @@ class SettingsWindow(NSObject):
 
     def ollamaPullDone_(self, _arg):  # noqa: N802
         ok, model = self._pull_result
+        self._models_dl_btn.setEnabled_(True)
         self._note.setStringValue_(
             self._t("note_ollama_pulled" if ok else "note_ollama_pull_fail").format(model)
         )
-        if ok:  # make sure the freshly-pulled model is offered in the dropdown
-            have = [str(self._ollama.itemObjectValueAtIndex_(i))
-                    for i in range(self._ollama.numberOfItems())]
-            if model not in have:
-                self._ollama.addItemWithObjectValue_(model)
+        if ok:  # offer the freshly-pulled model where models are picked
+            for cb in (self._ollama, self._models_pull):
+                have = [str(cb.itemObjectValueAtIndex_(i)) for i in range(cb.numberOfItems())]
+                if model not in have:
+                    cb.addItemWithObjectValue_(model)
+            self._start_ollama_check()  # refresh the installed list + status
 
-    # -- Ollama install / running status (#40) --------------------------------
+    # -- Ollama status / install / restart (Models tab) -----------------------
 
     def recheckOllama_(self, _sender):  # noqa: N802
         self._start_ollama_check()
 
     @objc.python_method
     def _start_ollama_check(self):
-        """Probe (in the background) whether Ollama is installed and running, then
-        reflect it in the status line + the context action button."""
+        """Probe (in the background) whether Ollama is installed/running, its version
+        and which models are installed, then reflect it on the Models tab."""
         self._ollama_status.setStringValue_(self._t("ollama_checking"))
         self._ollama_status.setTextColor_(NSColor.secondaryLabelColor())
+        self._models_installed.setStringValue_(self._t("models_installed_loading"))
         url = str(self._ollama_url.stringValue()).strip() or "http://localhost:11434"
         threading.Thread(target=self._check_ollama, args=(url,), daemon=True).start()
 
@@ -1158,25 +1183,38 @@ class SettingsWindow(NSObject):
         installed = shutil.which("ollama") is not None or any(
             os.path.exists(p) for p in ("/usr/local/bin/ollama", "/opt/homebrew/bin/ollama")
         )
-        running = False
+        running, version, models = False, "", []
         try:
             import requests
 
-            requests.get(f"{url}/api/tags", timeout=1.5)
+            tags = requests.get(f"{url}/api/tags", timeout=1.5)
             running = True
+            models = [(str(m.get("name", "")), int(m.get("size", 0)))
+                      for m in (tags.json().get("models") or [])]
+            try:
+                version = str(requests.get(f"{url}/api/version", timeout=1.5).json().get("version", ""))
+            except Exception:  # noqa: BLE001 - version is a nice-to-have
+                version = ""
         except Exception:  # noqa: BLE001 - any failure = not reachable
             running = False
         self._ollama_state = "running" if running else ("not_running" if installed else "not_installed")
+        self._ollama_version = version
+        self._ollama_models = sorted(models)
         self.performSelectorOnMainThread_withObject_waitUntilDone_("ollamaStatusUpdated:", None, False)
 
     def ollamaStatusUpdated_(self, _arg):  # noqa: N802
-        text_key, color = {
-            "running": ("ollama_running", NSColor.systemGreenColor()),
-            "not_running": ("ollama_not_running", NSColor.systemOrangeColor()),
-            "not_installed": ("ollama_not_installed", NSColor.systemRedColor()),
-        }.get(self._ollama_state, ("ollama_checking", NSColor.secondaryLabelColor()))
-        self._ollama_status.setStringValue_(self._t(text_key))
-        self._ollama_status.setTextColor_(color)
+        version = getattr(self, "_ollama_version", "")
+        if self._ollama_state == "running" and version:
+            self._ollama_status.setStringValue_(self._t("ollama_running_v").format(version))
+            self._ollama_status.setTextColor_(NSColor.systemGreenColor())
+        else:
+            text_key, color = {
+                "running": ("ollama_running", NSColor.systemGreenColor()),
+                "not_running": ("ollama_not_running", NSColor.systemOrangeColor()),
+                "not_installed": ("ollama_not_installed", NSColor.systemRedColor()),
+            }.get(self._ollama_state, ("ollama_checking", NSColor.secondaryLabelColor()))
+            self._ollama_status.setStringValue_(self._t(text_key))
+            self._ollama_status.setTextColor_(color)
         if self._ollama_state == "not_installed":
             self._ollama_action.setTitle_(self._t("ollama_install_btn"))
             self._ollama_action.setHidden_(False)
@@ -1185,6 +1223,25 @@ class SettingsWindow(NSObject):
             self._ollama_action.setHidden_(False)
         else:
             self._ollama_action.setHidden_(True)
+        self._update_installed_label()
+
+    @objc.python_method
+    def _update_installed_label(self):
+        models = getattr(self, "_ollama_models", [])
+        if self._ollama_state != "running":
+            self._models_installed.setStringValue_("—")
+            return
+        if not models:
+            self._models_installed.setStringValue_(self._t("models_installed_none"))
+            return
+
+        def _sz(n):
+            gb = n / 1e9
+            return f"{gb:.1f} GB" if gb >= 0.1 else f"{n / 1e6:.0f} MB"
+
+        self._models_installed.setStringValue_(
+            "\n".join(f"• {name}  ({_sz(size)})" for name, size in models)
+        )
 
     def ollamaAction_(self, _sender):  # noqa: N802
         if self._ollama_state == "not_installed":
@@ -1197,6 +1254,16 @@ class SettingsWindow(NSObject):
         elif self._ollama_state == "not_running":
             self._note.setStringValue_(self._t("ollama_starting"))
             threading.Thread(target=self._start_ollama_serve, daemon=True).start()
+
+    def restartOllama_(self, _sender):  # noqa: N802
+        self._note.setStringValue_(self._t("ollama_restarting"))
+        threading.Thread(target=self._restart_ollama_serve, daemon=True).start()
+
+    def openOllamaLibrary_(self, _sender):  # noqa: N802
+        from AppKit import NSWorkspace
+        from Foundation import NSURL
+
+        NSWorkspace.sharedWorkspace().openURL_(NSURL.URLWithString_("https://ollama.com/library"))
 
     @objc.python_method
     def _start_ollama_serve(self):
@@ -1211,6 +1278,28 @@ class SettingsWindow(NSObject):
         except Exception as exc:  # noqa: BLE001
             log.warning("ollama serve failed: %s", exc)
         time.sleep(2.0)  # let it bind the port, then re-check on the main thread
+        self.performSelectorOnMainThread_withObject_waitUntilDone_("recheckOllama:", None, False)
+
+    @objc.python_method
+    def _restart_ollama_serve(self):
+        """Restart the Ollama daemon: prefer brew (the usual managed service), else
+        kill + relaunch. Re-checks afterwards so the user sees the state change."""
+        import shutil
+        import subprocess
+        import time
+
+        try:
+            if shutil.which("brew"):
+                subprocess.run(["brew", "services", "restart", "ollama"],
+                               capture_output=True, timeout=60)
+            else:
+                subprocess.run(["pkill", "-x", "ollama"], capture_output=True)
+                time.sleep(1.0)
+                subprocess.Popen(["ollama", "serve"], stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.DEVNULL, start_new_session=True)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("ollama restart failed: %s", exc)
+        time.sleep(2.0)
         self.performSelectorOnMainThread_withObject_waitUntilDone_("recheckOllama:", None, False)
 
     # -- API key storage in .env (#38) ----------------------------------------

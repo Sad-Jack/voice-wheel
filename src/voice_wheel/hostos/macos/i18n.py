@@ -42,11 +42,6 @@ STR = {
         "The key is stored in .env (gitignored). Anthropic: console.anthropic.com → API Keys. "
         "OpenAI: platform.openai.com → API keys. Applies immediately.",
     ),
-    "download": ("Скачать", "Download"),
-    "note_ollama_pull": (
-        "Скачиваю модель «{}»… (ollama pull, идёт в фоне)",
-        "Downloading model «{}»… (ollama pull, in the background)",
-    ),
     "note_ollama_pulled": ("Модель «{}» скачана.", "Model «{}» downloaded."),
     "note_ollama_pull_fail": (
         "Не удалось скачать «{}». Установлена и запущена ли Ollama? (ollama serve)",
@@ -70,6 +65,34 @@ STR = {
     "ollama_start_btn": ("Запустить Ollama", "Start Ollama"),
     "ollama_recheck_btn": ("Проверить", "Re-check"),
     "ollama_starting": ("Запускаю Ollama…", "Starting Ollama…"),
+    "ollama_running_v": ("✅ Ollama запущена · v{}", "✅ Ollama is running · v{}"),
+    "ollama_restart_btn": ("Перезапустить Ollama", "Restart Ollama"),
+    "ollama_restarting": ("Перезапускаю Ollama…", "Restarting Ollama…"),
+    # Models tab
+    "tab_models": ("Модели", "Models"),
+    "models_header": ("📦 Локальные модели (Ollama)", "📦 Local models (Ollama)"),
+    "models_installed_header": ("Установлено:", "Installed:"),
+    "models_installed_none": (
+        "Пока ничего не скачано. Выбери модель ниже и нажми «Скачать».",
+        "Nothing downloaded yet. Pick a model below and press «Download».",
+    ),
+    "models_installed_loading": ("Загружаю список…", "Loading list…"),
+    "models_download_header": ("Скачать модель:", "Download a model:"),
+    "models_download_hint": (
+        "Выбери предложенную модель или впиши своё имя (например «llama3.1:8b») — она "
+        "скачается локально через Ollama. Дефолт для русского — qwen2.5:7b. Прогресс — "
+        "в строке снизу; по готовности появится в списке выше.",
+        "Pick a suggested model or type your own (e.g. «llama3.1:8b») — it downloads "
+        "locally via Ollama. The Russian default is qwen2.5:7b. Progress shows below; "
+        "once done it appears in the list above.",
+    ),
+    "ollama_library_btn": ("🔗 Библиотека моделей Ollama", "🔗 Ollama model library"),
+    "models_pull_btn": ("Скачать", "Download"),
+    "models_downloading": ("⏳ Скачиваю «{}»… (может занять минуты)", "⏳ Downloading «{}»… (may take minutes)"),
+    "llm_models_pointer": (
+        "Скачивание и список установленных моделей — на вкладке «Модели».",
+        "Downloading and the installed-models list live on the «Models» tab.",
+    ),
     "cc_hint": (
         "Через установленный claude CLI на подписке Max (без ключа). "
         "Установи Claude Code и выполни claude login.",
@@ -262,7 +285,6 @@ STR = {
         "The specific model: pick a recommendation or type your own.",
     ),
     "tip_ollama_url": ("Адрес локального Ollama. Обычно не трогаем.", "Local Ollama address. Usually left as-is."),
-    "tip_download": ("Скачать выбранную модель (ollama pull) в фоне.", "Download the selected model (ollama pull) in the background."),
     "tip_stt_backend": ("Чем распознаём речь. auto — оптимально под железо.", "The recognizer. auto picks the best for your hardware."),
     "tip_stt_model": ("Точность ↔ скорость. small — оптимум для русского.", "Accuracy ↔ speed. small is the Russian sweet spot."),
     "tip_stt_lang": ("Язык распознавания. auto — определять по речи.", "Recognition language. auto detects it from speech."),
