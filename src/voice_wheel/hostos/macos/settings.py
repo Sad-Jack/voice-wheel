@@ -149,8 +149,8 @@ def _capture_kind_key(event):
 # (config value, (ru label, en label)) — the picker shows the label, stores the value.
 # Selection is read/written by *index* so translated labels never break Save.
 LLM_BACKENDS = [
-    ("ollama", ("Локально — Ollama (бесплатно, без ключа)", "Local — Ollama (free, no key)")),
-    ("claude_warm", ("Claude Max (подписка)", "Claude Max (subscription)")),
+    ("ollama", ("Ollama", "Ollama")),
+    ("claude_warm", ("Claude (подписка)", "Claude (subscription)")),
     ("anthropic", ("Claude API (нужен ключ)", "Claude API (needs a key)")),
     ("openai", ("OpenAI API (нужен ключ)", "OpenAI API (needs a key)")),
     ("claude_cli", ("Claude CLI", "Claude CLI")),
