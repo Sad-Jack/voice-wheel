@@ -471,9 +471,12 @@ class SettingsWindow(NSObject):
         self._grp_ollama = group()
         prev, stack[0] = stack[0], self._grp_ollama
         # A pure selector of INSTALLED models (filled live from /api/tags) — no
-        # free-text. Download / manage models on the «Модели» tab.
+        # free-text. When nothing is installed, the popup is swapped for a button
+        # that jumps to the «Модели» tab. Download / manage models there.
         self._ollama = popup([], w=200)
-        row("model", self._ollama)
+        self._ollama_none_btn = button("ollama_no_models_btn", "openModelsTab:", 300)
+        self._ollama_none_btn.setHidden_(True)
+        row("model", self._ollama, self._ollama_none_btn)
         self._ollama_url = field(w=250)
         row("ollama_url", self._ollama_url)
         hint("ollama_hint")
@@ -1293,18 +1296,29 @@ class SettingsWindow(NSObject):
 
     @objc.python_method
     def _refresh_ollama_model_popup(self):
-        """The LLM-tab model picker is a pure selector of INSTALLED models (download /
-        manage on the Models tab). The configured model is kept selectable even if it
-        isn't installed (so opening settings never silently changes the saved value)."""
+        """The LLM-tab model picker is a pure selector of INSTALLED models. If Ollama
+        is running but NOTHING is installed, hide the popup and show a button that
+        jumps to the «Модели» tab (so a deleted model doesn't keep showing). While the
+        state is still unknown (not yet checked) keep the configured model so it isn't
+        lost — and over Ollama-down too."""
+        items = [name for name, _ in getattr(self, "_ollama_models", [])]
+        if getattr(self, "_ollama_state", None) == "running" and not items:
+            self._ollama.setHidden_(True)
+            self._ollama_none_btn.setHidden_(False)
+            return
+        self._ollama_none_btn.setHidden_(True)
+        self._ollama.setHidden_(False)
         desired = str(self._ollama.titleOfSelectedItem() or "") or getattr(
             self, "_ollama_model_value", "")
-        items = [name for name, _ in getattr(self, "_ollama_models", [])]
         if desired and desired not in items:
-            items.insert(0, desired)
+            items = [desired, *items]
         self._ollama.removeAllItems()
         self._ollama.addItemsWithTitles_(items)
         if desired:
             self._ollama.selectItemWithTitle_(desired)
+
+    def openModelsTab_(self, _sender):  # noqa: N802
+        self._tabs.selectTabViewItemWithIdentifier_("tab_models")
 
     @objc.python_method
     def _clear_installed(self):

@@ -55,6 +55,7 @@ STR = {
         "A model via Ollama — it must be installed and running (ollama serve). "
         "The URL can be local or your own remote server; usually left as-is.",
     ),
+    "ollama_no_models_btn": ("⚠️ Нет моделей — открыть «Модели»", "⚠️ No models — open «Models»"),
     "ollama_token": ("Токен (опц.)", "Token (opt.)"),
     "ollama_token_hint": (
         "Для удалённой Ollama с авторизацией (заголовок Bearer). Локальной обычно не "
