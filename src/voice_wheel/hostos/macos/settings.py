@@ -269,6 +269,16 @@ class SettingsWindow(NSObject):
         app.activateIgnoringOtherApps_(True)
         self._window.center()
         self._window.makeKeyAndOrderFront_(None)
+        self.performSelector_withObject_afterDelay_("clearFocus:", None, 0.0)
+
+    def tabView_didSelectTabViewItem_(self, _tab_view, _item):  # noqa: N802
+        # NSTabView auto-focuses the new tab's first text field; drop it so the caret
+        # doesn't land in an input (e.g. «Скачать модель») just from switching tabs.
+        self.performSelector_withObject_afterDelay_("clearFocus:", None, 0.0)
+
+    def clearFocus_(self, _arg):  # noqa: N802
+        if self._window is not None:
+            self._window.makeFirstResponder_(self._window)
 
     # -- build ----------------------------------------------------------------
 
@@ -298,6 +308,7 @@ class SettingsWindow(NSObject):
         tabs = NSTabView.alloc().initWithFrame_(NSMakeRect(10, 54, W - 20, H - 100))
         root.addSubview_(tabs)
         self._tabs = tabs
+        tabs.setDelegate_(self)  # clear auto-focus when a tab is selected (see below)
 
         stack = [None]   # the current tab's vertical NSStackView (Auto-Layout, auto-aligns)
 
@@ -421,7 +432,7 @@ class SettingsWindow(NSObject):
 
         # Connection type: three radios; only the selected type's settings show (#36).
         self._conn_radios = []
-        for tkey, lblkey in (("api", "conn_api"), ("ollama", "conn_ollama"), ("cc", "conn_cc")):
+        for tkey, lblkey in (("ollama", "conn_ollama"), ("cc", "conn_cc"), ("api", "conn_api")):
             rb = NSButton.radioButtonWithTitle_target_action_(T(lblkey), self, "connTypeChanged:")
             stack[0].addArrangedSubview_(rb)
             self._conn_radios.append((rb, tkey))
@@ -460,9 +471,12 @@ class SettingsWindow(NSObject):
         self._grp_ollama = group()
         prev, stack[0] = stack[0], self._grp_ollama
         # A pure selector of INSTALLED models (filled live from /api/tags) — no
-        # free-text. Download / manage models on the «Модели» tab.
+        # free-text. When nothing is installed, the popup is swapped for a button
+        # that jumps to the «Модели» tab. Download / manage models there.
         self._ollama = popup([], w=200)
-        row("model", self._ollama)
+        self._ollama_none_btn = button("ollama_no_models_btn", "openModelsTab:", 300)
+        self._ollama_none_btn.setHidden_(True)
+        row("model", self._ollama, self._ollama_none_btn)
         self._ollama_url = field(w=250)
         row("ollama_url", self._ollama_url)
         hint("ollama_hint")
@@ -641,7 +655,8 @@ class SettingsWindow(NSObject):
         root.addSubview_(self._save_btn)
 
         self._window = win
-        self._conn_radios[1][0].setState_(1)  # default to Ollama; _load re-applies
+        for rb, tkey in self._conn_radios:  # default to Ollama; _load re-applies the saved type
+            rb.setState_(1 if tkey == "ollama" else 0)
         self._apply_conn_visibility()
         self._wire_dirty()
         self._set_tooltips()
@@ -1281,18 +1296,29 @@ class SettingsWindow(NSObject):
 
     @objc.python_method
     def _refresh_ollama_model_popup(self):
-        """The LLM-tab model picker is a pure selector of INSTALLED models (download /
-        manage on the Models tab). The configured model is kept selectable even if it
-        isn't installed (so opening settings never silently changes the saved value)."""
+        """The LLM-tab model picker is a pure selector of INSTALLED models. If Ollama
+        is running but NOTHING is installed, hide the popup and show a button that
+        jumps to the «Модели» tab (so a deleted model doesn't keep showing). While the
+        state is still unknown (not yet checked) keep the configured model so it isn't
+        lost — and over Ollama-down too."""
+        items = [name for name, _ in getattr(self, "_ollama_models", [])]
+        if getattr(self, "_ollama_state", None) == "running" and not items:
+            self._ollama.setHidden_(True)
+            self._ollama_none_btn.setHidden_(False)
+            return
+        self._ollama_none_btn.setHidden_(True)
+        self._ollama.setHidden_(False)
         desired = str(self._ollama.titleOfSelectedItem() or "") or getattr(
             self, "_ollama_model_value", "")
-        items = [name for name, _ in getattr(self, "_ollama_models", [])]
         if desired and desired not in items:
-            items.insert(0, desired)
+            items = [desired, *items]
         self._ollama.removeAllItems()
         self._ollama.addItemsWithTitles_(items)
         if desired:
             self._ollama.selectItemWithTitle_(desired)
+
+    def openModelsTab_(self, _sender):  # noqa: N802
+        self._tabs.selectTabViewItemWithIdentifier_("tab_models")
 
     @objc.python_method
     def _clear_installed(self):

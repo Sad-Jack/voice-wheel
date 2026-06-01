@@ -27,9 +27,9 @@ STR = {
         "Откуда брать ИИ, который превращает речь в результат под промпт сектора.",
         "Where the AI that turns speech into the sector-prompt result comes from.",
     ),
-    "conn_api": ("Прямой API (облако, по ключу)", "Direct API (cloud, by key)"),
-    "conn_ollama": ("Ollama (бесплатно)", "Ollama (free)"),
-    "conn_cc": ("Claude Code (CLI, подписка Max)", "Claude Code (CLI, Max plan)"),
+    "conn_api": ("Прямой API", "Direct API"),
+    "conn_ollama": ("Ollama", "Ollama"),
+    "conn_cc": ("Claude Code CLI", "Claude Code CLI"),
     "provider": ("Провайдер", "Provider"),
     "api_key": ("API-ключ", "API key"),
     "show_key": ("Показать", "Show"),
@@ -55,6 +55,7 @@ STR = {
         "A model via Ollama — it must be installed and running (ollama serve). "
         "The URL can be local or your own remote server; usually left as-is.",
     ),
+    "ollama_no_models_btn": ("⚠️ Нет моделей — открыть «Модели»", "⚠️ No models — open «Models»"),
     "ollama_token": ("Токен (опц.)", "Token (opt.)"),
     "ollama_token_hint": (
         "Для удалённой Ollama с авторизацией (заголовок Bearer). Локальной обычно не "
