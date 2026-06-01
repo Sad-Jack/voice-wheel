@@ -797,12 +797,7 @@ class SettingsWindow(NSObject):
         stack[0].addArrangedSubview_(self._concurrent)
 
         # ---- Language tab ----
-        add_tab("tab_lang")
-        header("lang_header")  # 🌐 Язык интерфейса — the dropdown sits right under it
-        self._uilang_popup = popup(["Русский", "English"], w=200)
-        self._uilang_popup.selectItemAtIndex_(0 if self._uilang == "ru" else 1)
-        stack[0].addArrangedSubview_(self._uilang_popup)
-        hint("lang_hint")
+        self._build_lang(b)
 
         # ---- Logs tab (read-only event feed; newest first, auto-refreshing) ----
         add_tab("tab_logs")
@@ -878,6 +873,17 @@ class SettingsWindow(NSObject):
         self._set_tooltips()
         self._capture_baseline()
         self._refresh_key_status()  # reflect any auth failures carried over in the log
+
+    # -- per-tab builders (each appends its tab via the shared _TabBuilder `b`) ----
+
+    @objc.python_method
+    def _build_lang(self, b):
+        b.add_tab("tab_lang")
+        b.header("lang_header")  # 🌐 Язык интерфейса — the dropdown sits right under it
+        self._uilang_popup = b.popup(["Русский", "English"], w=200)
+        self._uilang_popup.selectItemAtIndex_(0 if self._uilang == "ru" else 1)
+        b.cur.addArrangedSubview_(self._uilang_popup)
+        b.hint("lang_hint")
 
     @objc.python_method
     def _set_tooltips(self):
