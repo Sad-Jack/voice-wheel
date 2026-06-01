@@ -134,10 +134,19 @@ STR = {
         "Downloading and the installed-models list live on the «Models» tab.",
     ),
     "cc_hint": (
-        "Через установленный claude CLI на подписке Max (без ключа). "
-        "Установи Claude Code и выполни claude login.",
-        "Via the installed claude CLI on the Max plan (no key). "
-        "Install Claude Code and run claude login.",
+        "Зовём локальный `claude` (Claude Code) на твоей подписке Pro/Max — без ключа. "
+        "Нужны установка и вход (кнопки ниже).",
+        "Calls the local `claude` (Claude Code) on your Pro/Max plan — no key. Needs "
+        "install + login (buttons below).",
+    ),
+    "claude_checking": ("Проверяю Claude Code…", "Checking Claude Code…"),
+    "claude_ok": ("🟢 Claude Code установлен ({})", "🟢 Claude Code installed ({})"),
+    "claude_missing": ("🔴 Claude Code не установлен", "🔴 Claude Code not installed"),
+    "cc_install_btn": ("Как установить…", "How to install…"),
+    "cc_login_btn": ("Войти / настроить (Терминал)", "Log in / set up (Terminal)"),
+    "cc_login_note": (
+        "Открыл Терминал — войди там (откроется браузер). После входа нажми «Проверить».",
+        "Opened Terminal — log in there (a browser opens). Then click «Re-check».",
     ),
     "prompts_header": ("🧩 Промпты — секторы колеса", "🧩 Prompts — wheel sectors"),
     "prompts_count": ("Сейчас промптов: {}", "Prompts now: {}"),

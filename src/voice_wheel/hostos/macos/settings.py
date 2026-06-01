@@ -866,9 +866,21 @@ class SettingsWindow(NSObject):
         b.hint("llm_models_pointer")
         b.cur = prev
 
-        # -- Claude Code group: model --
+        # -- Claude Code group: status + install/login + model --
         self._grp_cc = b.group()
         prev, b.cur = b.cur, self._grp_cc
+        self._cc_state = None  # None=unknown · "ok" · "missing"
+        self._cc_status = b.label("", gray=True)
+        b.cur.addArrangedSubview_(self._cc_status)
+        # contextual: «Как установить…» (missing) or «Войти / настроить» (installed)
+        self._cc_action = NSButton.buttonWithTitle_target_action_("", self, "claudeAction:")
+        self._cc_action.setHidden_(True)
+        cc_btns = NSStackView.alloc().init()
+        cc_btns.setOrientation_(NSUserInterfaceLayoutOrientationHorizontal)
+        cc_btns.setSpacing_(8)
+        cc_btns.addArrangedSubview_(self._cc_action)
+        cc_btns.addArrangedSubview_(b.button("ollama_recheck_btn", "recheckClaude:", 120))
+        b.cur.addArrangedSubview_(cc_btns)
         self._cc_model = b.combo(CC_MODELS, w=250)
         b.row("model", self._cc_model)
         b.hint("cc_hint")
@@ -1144,6 +1156,7 @@ class SettingsWindow(NSObject):
         self._apply_conn_visibility()
         self._refresh_api_availability()  # offer only providers whose key is set
         self._start_ollama_check()  # populate the Models tab (status + installed list) on open
+        self._start_claude_check()  # populate the Claude Code group's install status
         stt = data.get("stt", {})
         self._stt_backend.selectItemWithTitle_(stt.get("backend", "auto"))
         self._stt_model.selectItemWithTitle_(str(stt.get("model", "small")))
@@ -1302,8 +1315,11 @@ class SettingsWindow(NSObject):
         for rb, _ in self._conn_radios:
             rb.setState_(1 if rb == sender else 0)
         self._apply_conn_visibility()
-        if self._selected_conn_type() == "ollama":
+        t = self._selected_conn_type()
+        if t == "ollama":
             self._start_ollama_check()
+        elif t == "cc":
+            self._start_claude_check()
         self._recompute_dirty()
 
     @objc.python_method
@@ -1542,6 +1558,70 @@ class SettingsWindow(NSObject):
 
     def recheckOllama_(self, _sender):  # noqa: N802
         self._start_ollama_check()
+
+    # -- Claude Code CLI: detect install + offer install/login -----------------
+
+    def recheckClaude_(self, _sender):  # noqa: N802
+        self._start_claude_check()
+
+    @objc.python_method
+    def _start_claude_check(self):
+        """Probe (in the background) whether the `claude` CLI is installed + its
+        version, then reflect it on the LLM tab's Claude Code group."""
+        self._cc_status.setStringValue_(self._t("claude_checking"))
+        self._cc_status.setTextColor_(NSColor.secondaryLabelColor())
+        threading.Thread(target=self._check_claude, daemon=True).start()
+
+    @objc.python_method
+    def _check_claude(self):
+        import os
+        import shutil
+        import subprocess
+        path = shutil.which("claude") or os.path.expanduser("~/.local/bin/claude")
+        version = ""
+        if os.path.exists(path):
+            try:
+                r = subprocess.run([path, "--version"], capture_output=True, text=True, timeout=8)
+                if r.returncode == 0:
+                    version = (r.stdout or "").strip().split()[0]
+            except Exception:  # noqa: BLE001 - best-effort version probe
+                version = "?"
+        self._claude_check = (bool(version) or os.path.exists(path), version)
+        self.performSelectorOnMainThread_withObject_waitUntilDone_(
+            "claudeStatusUpdated:", None, False)
+
+    def claudeStatusUpdated_(self, _arg):  # noqa: N802
+        installed, version = getattr(self, "_claude_check", (False, ""))
+        if installed:
+            self._cc_state = "ok"
+            self._cc_status.setStringValue_(self._t("claude_ok").format(version or "—"))
+            self._cc_status.setTextColor_(NSColor.systemGreenColor())
+            self._cc_action.setTitle_(self._t("cc_login_btn"))
+            self._cc_action.setHidden_(False)
+        else:
+            self._cc_state = "missing"
+            self._cc_status.setStringValue_(self._t("claude_missing"))
+            self._cc_status.setTextColor_(NSColor.systemRedColor())
+            self._cc_action.setTitle_(self._t("cc_install_btn"))
+            self._cc_action.setHidden_(False)
+
+    def claudeAction_(self, _sender):  # noqa: N802
+        if self._cc_state == "missing":
+            from AppKit import NSWorkspace
+            from Foundation import NSURL
+            NSWorkspace.sharedWorkspace().openURL_(
+                NSURL.URLWithString_("https://code.claude.com/docs/en/setup"))
+        else:  # installed -> open Terminal and run `claude` (logs in via browser prompts)
+            import subprocess
+            try:
+                subprocess.run([
+                    "osascript",
+                    "-e", 'tell application "Terminal" to do script "claude"',
+                    "-e", 'tell application "Terminal" to activate',
+                ], timeout=8)
+                self._note.setStringValue_(self._t("cc_login_note"))
+            except Exception as exc:  # noqa: BLE001 - opening Terminal is best-effort
+                log.warning("could not open Terminal for claude login: %s", exc)
 
     @objc.python_method
     def _start_ollama_check(self):

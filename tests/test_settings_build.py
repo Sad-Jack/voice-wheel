@@ -32,7 +32,7 @@ from voice_wheel.hostos.macos.settings import (  # noqa: E402
 WIDGET_ATTRS = [
     "_tabs", "_grp_api", "_grp_ollama", "_grp_cc",
     "_provider", "_provider_row", "_api_model", "_api_model_row", "_api_no_key_btn",
-    "_ollama", "_ollama_none_btn", "_ollama_url", "_cc_model",
+    "_ollama", "_ollama_none_btn", "_ollama_url", "_cc_model", "_cc_status", "_cc_action",
     "_ollama_status", "_ollama_action",
     "_models_installed", "_models_pull", "_models_dl_btn",
     "_prompts_label", "_rules_stack",
