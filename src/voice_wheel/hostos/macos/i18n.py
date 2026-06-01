@@ -37,6 +37,10 @@ STR = {
         "Ключи и токены — на вкладке «Ключи».",
         "Keys & tokens are on the «Keys» tab.",
     ),
+    "keys_redirect_btn": (
+        "⚠️ Нет ключа — добавить на вкладке «Ключи»",
+        "⚠️ No key — add one on the «Keys» tab",
+    ),
     # LLM tab
     "llm_header": ("🧠 Обработка речи (LLM)", "🧠 Speech processing (LLM)"),
     "engine": ("Движок", "Engine"),

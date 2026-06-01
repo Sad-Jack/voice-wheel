@@ -451,9 +451,13 @@ class SettingsWindow(NSObject):
         self._provider = popup(["Anthropic", "OpenAI"], w=160)
         self._provider.setTarget_(self)
         self._provider.setAction_("providerChanged:")
-        row("provider", self._provider)
+        self._provider_row = row("provider", self._provider)
         self._api_model = combo(ANTHROPIC_MODELS, w=250)  # provider switch updates the list
-        row("model", self._api_model)
+        self._api_model_row = row("model", self._api_model)
+        # shown instead of provider/model when no provider has a key on the «Ключи» tab
+        self._api_no_key_btn = button("keys_redirect_btn", "openKeysTab:", 360)
+        self._api_no_key_btn.setHidden_(True)
+        stack[0].addArrangedSubview_(self._api_no_key_btn)
         hint("keys_pointer")
         stack[0] = prev
 
@@ -784,6 +788,11 @@ class SettingsWindow(NSObject):
         self._recompute_dirty()
 
     def controlTextDidChange_(self, _notif):  # noqa: N802
+        # editing a key on the «Ключи» tab changes what's available to pick
+        obj = _notif.object()
+        if any(obj in (e["secure"], e["plain"]) for e in getattr(self, "_key_rows", [])):
+            self._refresh_api_availability()
+            self._refresh_rule_engines()
         self._recompute_dirty()
 
     def comboBoxSelectionDidChange_(self, _notif):  # noqa: N802
@@ -927,6 +936,7 @@ class SettingsWindow(NSObject):
             e["secure"].setHidden_(False)
             e["plain"].setHidden_(True)
         self._apply_conn_visibility()
+        self._refresh_api_availability()  # offer only providers whose key is set
         self._start_ollama_check()  # populate the Models tab (status + installed list) on open
         stt = data.get("stt", {})
         self._stt_backend.selectItemWithTitle_(stt.get("backend", "auto"))
@@ -948,6 +958,7 @@ class SettingsWindow(NSObject):
         for key, ov in (data.get("sector_models") or {}).items():
             if isinstance(ov, dict):  # skip the "_comment" string
                 self._make_rule_row(key, ov.get("backend", "ollama"), ov.get("model", ""))
+        self._refresh_rule_engines()  # grey out engines whose key isn't set
         self._refresh_add_button()
         self._note.setStringValue_("")
         self._capture_baseline()
@@ -1151,6 +1162,63 @@ class SettingsWindow(NSObject):
         """The key for the currently selected Direct-API provider (from the Keys tab)."""
         e = self._key_entry(self._provider_env_var())
         return self._key_value(e) if e else ""
+
+    # -- availability: only offer connections whose key is set (#13a) ----------
+
+    @objc.python_method
+    def _has_key(self, env_var):
+        e = self._key_entry(env_var)
+        return bool(self._key_value(e).strip()) if e else False
+
+    @objc.python_method
+    def _available_providers(self):
+        out = []
+        if self._has_key("ANTHROPIC_API_KEY"):
+            out.append("Anthropic")
+        if self._has_key("OPENAI_API_KEY"):
+            out.append("OpenAI")
+        return out
+
+    @objc.python_method
+    def _backend_available(self, backend):
+        """Ollama / Claude Code / Claude CLI need no key; API backends need theirs."""
+        if backend == "anthropic":
+            return self._has_key("ANTHROPIC_API_KEY")
+        if backend == "openai":
+            return self._has_key("OPENAI_API_KEY")
+        return True
+
+    @objc.python_method
+    def _refresh_api_availability(self):
+        """Direct-API group: offer only providers with a key; if none, swap the
+        provider/model rows for a button that jumps to the «Ключи» tab."""
+        avail = self._available_providers()
+        self._api_no_key_btn.setHidden_(bool(avail))
+        self._provider_row.setHidden_(not avail)
+        self._api_model_row.setHidden_(not avail)
+        if not avail:
+            return
+        for i in range(self._provider.numberOfItems()):
+            self._provider.itemAtIndex_(i).setEnabled_(
+                str(self._provider.itemTitleAtIndex_(i)) in avail)
+        if str(self._provider.titleOfSelectedItem()) not in avail:
+            self._provider.selectItemWithTitle_(avail[0])
+            self._last_provider = avail[0]
+            self._refresh_api_models()
+            self._api_model.setStringValue_(self._provider_models()[0])
+
+    @objc.python_method
+    def _set_rule_engine_availability(self, engine_popup):
+        for i, (val, _lbl) in enumerate(LLM_BACKENDS):
+            engine_popup.itemAtIndex_(i).setEnabled_(self._backend_available(val))
+
+    @objc.python_method
+    def _refresh_rule_engines(self):
+        for r in getattr(self, "_rules", []):
+            self._set_rule_engine_availability(r["engine"])
+
+    def openKeysTab_(self, _sender):  # noqa: N802
+        self._tabs.selectTabViewItemWithIdentifier_("tab_keys")
 
     def toggleKeyRow_(self, sender):  # noqa: N802
         e = next((e for e in self._key_rows if e["show"] == sender), None)
@@ -1653,6 +1721,7 @@ class SettingsWindow(NSObject):
         engine.setTarget_(self)
         engine.setAction_("ruleEngineChanged:")  # repopulate the model dropdown + mark dirty
         self._select_backend(engine, backend)
+        self._set_rule_engine_availability(engine)  # grey out engines without a key
         # editable combo: dropdown lists the engine's models (installed ones for
         # Ollama), but you can still type a custom name.
         model_combo = NSComboBox.alloc().initWithFrame_(NSMakeRect(0, 0, 150, 26))
