@@ -574,7 +574,6 @@ class SettingsWindow(NSObject):
         # aliases so the still-inline tab blocks read unchanged; each is dropped as
         # its tab is extracted, and the lot disappears once every tab is a method.
         add_tab = b.add_tab
-        label = b.label
         header = b.header
         hint = b.hint
         row = b.row
@@ -645,43 +644,8 @@ class SettingsWindow(NSObject):
         # ---- Prompts tab ----
         self._build_prompts(b)
 
-        # ---- Keys tab: every secret in one place (each masked + «Показать»),
-        #      stored in .env. The LLM tab / rules just pick a connection. ----
-        add_tab("tab_keys", scroll=True)
-        header("keys_header")
-        hint("keys_hint")
-        self._key_rows = []
-
-        def key_row(label_key, env_var):
-            secure = NSSecureTextField.alloc().initWithFrame_(NSMakeRect(0, 0, 320, 22))
-            secure.widthAnchor().constraintEqualToConstant_(320).setActive_(True)
-            plain = field(w=320)
-            plain.setHidden_(True)
-            secure.setDelegate_(self)
-            plain.setDelegate_(self)  # both -> controlTextDidChange_ -> dirty
-            # a momentary eye button (icon only): click reveals the key; it re-masks
-            # on tab switch / window close (see _mask_all_keys) — never a sticky checkbox
-            eye = NSButton.alloc().init()
-            eye.setBordered_(False)
-            eye.setTitle_("")
-            eimg = NSImage.imageWithSystemSymbolName_accessibilityDescription_("eye", T("show_key"))
-            eye.setImage_(eimg) if eimg is not None else eye.setTitle_("👁")
-            eye.setToolTip_(T("show_key"))
-            eye.setTarget_(self)
-            eye.setAction_("toggleKeyRow:")
-            eye.widthAnchor().constraintEqualToConstant_(28).setActive_(True)
-            # red «не работает» badge — hidden until a request fails auth (#14)
-            status = label("", gray=False)
-            status.setTextColor_(NSColor.systemRedColor())
-            status.setHidden_(True)
-            self._key_rows.append({
-                "env": env_var, "secure": secure, "plain": plain, "eye": eye, "status": status,
-            })
-            row(label_key, secure, plain, eye).addArrangedSubview_(status)
-
-        key_row("key_anthropic", "ANTHROPIC_API_KEY")
-        key_row("key_openai", "OPENAI_API_KEY")
-        key_row("key_ollama", "OLLAMA_API_KEY")
+        # ---- Keys tab ----
+        self._build_keys(b)
 
         # ---- Speech (STT) tab ----
         self._build_stt(b)
@@ -907,6 +871,46 @@ class SettingsWindow(NSObject):
         b.cur.addArrangedSubview_(dl_row)
         b.hint("models_download_hint")
         b.cur.addArrangedSubview_(b.button("ollama_library_btn", "openOllamaLibrary:", 250))
+
+    @objc.python_method
+    def _build_keys(self, b):
+        # every secret in one place (each masked + eye reveal), stored in .env.
+        # The LLM tab / rules just pick a connection.
+        b.add_tab("tab_keys", scroll=True)
+        b.header("keys_header")
+        b.hint("keys_hint")
+        self._key_rows = []
+
+        def key_row(label_key, env_var):
+            secure = NSSecureTextField.alloc().initWithFrame_(NSMakeRect(0, 0, 320, 22))
+            secure.widthAnchor().constraintEqualToConstant_(320).setActive_(True)
+            plain = b.field(w=320)
+            plain.setHidden_(True)
+            secure.setDelegate_(self)
+            plain.setDelegate_(self)  # both -> controlTextDidChange_ -> dirty
+            # a momentary eye button (icon only): click reveals the key; it re-masks
+            # on tab switch / window close (see _mask_all_keys) — never a sticky checkbox
+            eye = NSButton.alloc().init()
+            eye.setBordered_(False)
+            eye.setTitle_("")
+            eimg = NSImage.imageWithSystemSymbolName_accessibilityDescription_("eye", self._t("show_key"))
+            eye.setImage_(eimg) if eimg is not None else eye.setTitle_("👁")
+            eye.setToolTip_(self._t("show_key"))
+            eye.setTarget_(self)
+            eye.setAction_("toggleKeyRow:")
+            eye.widthAnchor().constraintEqualToConstant_(28).setActive_(True)
+            # red «не работает» badge — hidden until a request fails auth (#14)
+            status = b.label("", gray=False)
+            status.setTextColor_(NSColor.systemRedColor())
+            status.setHidden_(True)
+            self._key_rows.append({
+                "env": env_var, "secure": secure, "plain": plain, "eye": eye, "status": status,
+            })
+            b.row(label_key, secure, plain, eye).addArrangedSubview_(status)
+
+        key_row("key_anthropic", "ANTHROPIC_API_KEY")
+        key_row("key_openai", "OPENAI_API_KEY")
+        key_row("key_ollama", "OLLAMA_API_KEY")
 
     @objc.python_method
     def _set_tooltips(self):
