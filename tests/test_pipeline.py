@@ -57,7 +57,10 @@ def test_transform_calls_llm():
     llm = FakeLLM(available=True)
     pipe = Pipeline(FakeSTT("сырая мысль"), llm, FakeClipboard(), make_config())
     result = pipe.run(AUDIO, "transform", "normalize")
-    assert result.result == "LLM<<сырая мысль>>"
+    # the user message is labelled ГОЛОС: with no БУФЕР on the no-context ring
+    assert result.result == "LLM<<ГОЛОС:\nсырая мысль>>"
+    _system, user = llm.calls[0]
+    assert user == "ГОЛОС:\nсырая мысль"
     assert len(llm.calls) == 1
 
 
@@ -81,3 +84,8 @@ def test_context_includes_clipboard_and_truncates():
     assert "XXXXXXXXXX" in user  # 10 chars of context
     assert "X" * 11 not in user  # not more than the limit
     assert "ответь дружелюбно" in user
+    # speech and clipboard are labelled and separated, so the model can't mistake
+    # the buffer (possibly someone else's text) for the user's own words
+    assert "ГОЛОС:\nответь дружелюбно" in user
+    assert "БУФЕР:\n" in user
+    assert user.index("ГОЛОС:") < user.index("БУФЕР:")

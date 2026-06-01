@@ -40,36 +40,57 @@ class Sector:
 
 
 
-# Appended to every sector prompt to keep output paste-ready.
-_OUTPUT_TAIL = (
-    "Верни только готовый результат — без пояснений, без markdown, без кавычек. "
-    "Сохраняй смысл и не выбрасывай части. Отвечай на языке исходного текста "
-    "или того, чего требует контекст."
+# Labels for the two inputs in the user message. The prompt files key off exactly
+# these markers (their BASE section explains each), so the transport and the prompts
+# share one contract — keep them in sync.
+VOICE_LABEL = "ГОЛОС:"    # the user's own transcribed speech (their intent)
+BUFFER_LABEL = "БУФЕР:"   # external clipboard text — may be someone else's words
+
+# Common preamble seeded into every default prompt. Self-contained: it defines the
+# ГОЛОС/БУФЕР contract, the three modes, and the paste-ready output rule — so the
+# code no longer injects a prefix/tail (the prompt owns its whole behaviour).
+_DEFAULT_BASE = (
+    "Ты часть Voice Wheel. После этого промпта придёт вход с метками:\n"
+    "ГОЛОС: — моя речь (из распознавания, бывают ошибки). "
+    "БУФЕР: — текст из буфера обмена. Каждый может присутствовать или нет.\n\n"
+    "Режимы (по тому, что пришло):\n"
+    "- Только ГОЛОС → обрабатывай ГОЛОС.\n"
+    "- Только БУФЕР → обрабатывай БУФЕР как сам материал.\n"
+    "- ГОЛОС + БУФЕР → ГОЛОС это моё намерение, БУФЕР это контекст. БУФЕР может быть "
+    "чужим текстом — не выдавай его за моё и не пиши от его лица.\n\n"
+    "Восстанавливай искажённые распознаванием слова по смыслу, убирай «эээ», повторы "
+    "и оговорки. Правь форму, не содержание — ничего не выдумывай. Пиши от первого "
+    "лица, как написал бы я.\n\n"
+    "Вывод: только готовый результат — без преамбул, кавычек, пояснений и markdown "
+    "(если сам результат не код). Если нет ни ГОЛОСА, ни БУФЕРА — ничего не пиши."
 )
 
-_CONTEXT_PREFIX = (
-    "Используй текст из буфера обмена как контекст, а голосовую инструкцию — как "
-    "намерение пользователя."
-)
 
-# Seeded on first run if the prompts folder is empty (filename -> body).
+def _seed(label: str, body: str) -> str:
+    return f"{_DEFAULT_BASE}\n\n# === SECTOR: {label} ===\n{body}"
+
+
+# Seeded on first run if the prompts folder is empty (filename -> body). Each is the
+# shared BASE + a sector-specific instruction, so a fresh install works out of the box.
 DEFAULT_PROMPTS: dict[str, str] = {
-    "1-Нормализация.md": (
-        "Нормализуй распознанную речь: исправь ошибки распознавания и восстанови "
-        "правильные слова — особенно англицизмы и технические термины, которые "
-        "распознаватель мог исказить (например «пул-реквест», «деплой», «фронтенд», "
-        "«коммит», «дедлайн», «митинг», «стейджинг»). Расставь пунктуацию, сделай "
-        "текст чистым и читаемым. Сохрани исходный смысл и формулировки."
+    "1-Нормализация.md": _seed(
+        "Нормализация",
+        "Приведи текст в чистый читаемый вид: исправь грамматику и пунктуацию, "
+        "выстрой связный порядок мыслей, убери мусор и повторы. Сохрани мой смысл, "
+        "тон и стиль — не делай формальнее и ничего не добавляй.",
     ),
-    "2-Деловой.md": (
-        "Перепиши как вежливый деловой, официальный ответ коллеге. Чётко, "
-        "уважительно, без жаргона и лишних эмоций."
+    "2-Деловой.md": _seed(
+        "Деловой",
+        "Перепиши как вежливый деловой ответ коллеге: чётко, уважительно, без "
+        "жаргона и лишних эмоций.",
     ),
-    "3-Кратко.md": (
-        "Сократи до короткого, ёмкого варианта. Сохрани главный смысл, убери воду."
+    "3-Кратко.md": _seed(
+        "Кратко",
+        "Сократи до короткого, ёмкого варианта. Сохрани главный смысл, убери воду.",
     ),
-    "4-Дружелюбно.md": (
-        "Перепиши живо и дружелюбно, без официоза. Не делай слишком длинно."
+    "4-Дружелюбно.md": _seed(
+        "Дружелюбно",
+        "Перепиши живо и дружелюбно, без официоза. Не делай слишком длинно.",
     ),
 }
 
@@ -153,23 +174,31 @@ def get_sector(key: str) -> Sector | None:
 
 
 def build_system_prompt(ring: Ring, sector_key: str) -> str:
-    """System instruction for an LLM ring: the sector's prompt + universal tail."""
+    """The processing instruction for an LLM ring — the sector's authored prompt,
+    as-is. The prompt body owns output format and how to treat ГОЛОС vs БУФЕР; the
+    transport only labels the two inputs (see ``build_user_message``). The system
+    prompt is the same for transform and context (what differs is whether БУФЕР is
+    present in the user message), which also lets prompt caching reuse it."""
+    if ring not in (Ring.TRANSFORM, Ring.CONTEXT):
+        raise ValueError(f"Ring {ring} does not use the LLM")
     sector = get_sector(sector_key)
-    style = sector.prompt if sector else ""
-    if ring is Ring.TRANSFORM:
-        return f"{style}\n\n{_OUTPUT_TAIL}"
-    if ring is Ring.CONTEXT:
-        return f"{_CONTEXT_PREFIX} {style}\n\n{_OUTPUT_TAIL}"
-    raise ValueError(f"Ring {ring} does not use the LLM")
+    return sector.prompt if sector else ""
 
 
 def build_user_message(transcript: str, context: str | None = None) -> str:
-    if context:
-        return (
-            f"Контекст (буфер обмена):\n{context}\n\n"
-            f"Голосовая инструкция:\n{transcript}"
-        )
-    return transcript
+    """Label the two inputs so the model never conflates them: ``ГОЛОС:`` is the
+    user's own speech (their intent), ``БУФЕР:`` is external clipboard text that may
+    be someone else's words. Either may be absent — speech-only (no-context
+    transform), buffer-only (spoke nothing), or both. ГОЛОС leads (the intent),
+    БУФЕР follows as reference material."""
+    speech = (transcript or "").strip()
+    buf = (context or "").strip()
+    parts = []
+    if speech:
+        parts.append(f"{VOICE_LABEL}\n{speech}")
+    if buf:
+        parts.append(f"{BUFFER_LABEL}\n{buf}")
+    return "\n\n".join(parts)
 
 
 def normalize_ring(value: str) -> Ring:
