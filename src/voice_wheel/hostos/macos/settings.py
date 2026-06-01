@@ -771,20 +771,7 @@ class SettingsWindow(NSObject):
         hint("trig_check_hint")
 
         # ---- Triggers tab ----
-        add_tab("tab_triggers")
-        header("trig_header")
-        self._wheel_kb = field(w=170)
-        self._cap_wheel_kb = button("catch", "captureWheelKb:", 100)
-        self._wheel_kb_on = trig_row("trig_kb", self._wheel_kb, self._cap_wheel_kb)
-        self._wheel_ms = popup(self._mouse_labels(), w=200)
-        self._wheel_ms_map = [(k, key) for k, key, _ in MOUSE_BUTTONS]
-        self._cap_wheel_ms = button("catch", "captureWheelMs:", 90)
-        self._wheel_ms_on = trig_row("trig_mouse", self._wheel_ms, self._cap_wheel_ms)
-        hint("trig_hint")
-        hint("trig_check_hint")
-        header("misc_header")
-        self._concurrent = checkbox("concurrent")
-        stack[0].addArrangedSubview_(self._concurrent)
+        self._build_triggers(b)
 
         # ---- Language tab ----
         self._build_lang(b)
@@ -888,6 +875,23 @@ class SettingsWindow(NSObject):
         self._lang = b.popup(LANGS)
         b.row("language", self._lang)
         b.hint("stt_lang_hint")
+
+    @objc.python_method
+    def _build_triggers(self, b):
+        b.add_tab("tab_triggers")
+        b.header("trig_header")
+        self._wheel_kb = b.field(w=170)
+        self._cap_wheel_kb = b.button("catch", "captureWheelKb:", 100)
+        self._wheel_kb_on = b.trig_row("trig_kb", self._wheel_kb, self._cap_wheel_kb)
+        self._wheel_ms = b.popup(self._mouse_labels(), w=200)
+        self._wheel_ms_map = [(k, key) for k, key, _ in MOUSE_BUTTONS]
+        self._cap_wheel_ms = b.button("catch", "captureWheelMs:", 90)
+        self._wheel_ms_on = b.trig_row("trig_mouse", self._wheel_ms, self._cap_wheel_ms)
+        b.hint("trig_hint")
+        b.hint("trig_check_hint")
+        b.header("misc_header")
+        self._concurrent = b.checkbox("concurrent")
+        b.cur.addArrangedSubview_(self._concurrent)
 
     @objc.python_method
     def _set_tooltips(self):
